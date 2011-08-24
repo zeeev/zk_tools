@@ -1,0 +1,144 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+pseudo_human_chr -s <reference.fasta> -p <mySamtools.pileup>
+
+Description:
+
+This program humanizes a pileup file coming from SAMTOOLS.  Using the 
+reference sequence it gleans the scaffolds/contigs/chromosomes and the corresponding
+lengths.  It disgaruds scaffold/contig/chromosomes that are less than 2000 bp.  It then 
+creates 22 psuedo autosomes that are around the same size.  This is done by calculating 
+the total length of the reference - reads < 20000.  Pseudo chromosome length = total length / 22.
+After the creation of the pseudo chromosome it opens Pileup files (10 columns) and renames 
+column 1 and calibrates the SNP position.  
+
+";
+
+
+my $seq_file;
+my $file;
+
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			     "sequence_file=s"=> \$seq_file,
+			     "pileup_file=s"  => \$file,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+die $usage unless -r $file && -r $seq_file;
+open (IN, '<', $seq_file) or die "Can't open $seq_file for reading\n$!\n";
+
+
+
+my $seqid;
+my %seq_info;
+my $total_len = 0 ;
+
+while (<IN>) {
+    contig_length($_);
+}
+
+while(my($key, $value)= each(%seq_info)){
+    if($value < 2000){
+	delete($seq_info{$key});	    
+	}
+    else{
+	$total_len = $total_len + $value;
+    }
+}
+
+my $chrs = pseudo_chr(\%seq_info);
+write_new_pileup($file, $chrs);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+##use this sub to print the info on contig and length...
+    
+sub contig_length{
+    
+    $_ = shift;    
+    
+    chomp;				     
+    if($_ =~ /^>/){			     
+	$_ =~ s/>//;
+	my @scaf = split(/\s/, $_);
+	$seqid = $scaf[0];
+    }					     
+    else{			
+	my $seq_len = length($_);
+	$seq_info{$seqid} = $seq_len;	     
+    }                                        
+}
+
+
+#-----------------------------------------------------------------------------
+## print only lines that have the selected sequences and renumber the snp position.
+ 
+
+sub pseudo_chr{
+
+    my $seq_info = shift;
+    my %seq_info = %{$seq_info};
+
+    my $nchr = 22;							    
+    my $len_chr = $total_len / $nchr;				    
+    my %pseudo_chr;							    
+    
+    my $i; 								    
+    
+    for($i = 1; $i < 23; $i++){					    
+	my $len_temp_chr = 1;					    
+	while(my($key, $value) = each(%seq_info)){			    
+	    if($len_temp_chr <= $len_chr){				    
+		$pseudo_chr{"chr"."$i"}{$key} = $len_temp_chr;	    
+		$len_temp_chr = $len_temp_chr + $value + 1; 		    
+		delete($seq_info{$key});				    
+	    }							    
+	    elsif($len_temp_chr >= $len_chr){			    
+		last;						    
+	    }							    
+	}								    
+    }								    
+    return \%pseudo_chr;
+}
+
+#-----------------------------------------------------------------------------
+
+sub write_new_pileup{
+
+    my $file = shift;
+    my $pseudo_chr = shift;
+    my %pseudo_chr = %{$pseudo_chr};
+    
+    open(FILE, "<$file");
+    open(FILE2, ">$file.pseudochr");
+    while(<FILE>){
+	chomp;
+	my($scaffold,$position,$ref,$snp,$A,$B,$C,$D,$seq,$qual)= split(/\t/, $_);
+	if($ref =~/\*/){
+	    next;
+	}
+	my $i;
+	for($i = 1; $i < 23; $i++){
+	    if($pseudo_chr{"chr"."$i"}{$scaffold}){
+		$position = $position + $pseudo_chr{"chr"."$i"}{$scaffold};
+		print FILE2 "$i\t$position\t$ref\t$snp\t$A\t$B\t$C\t$D\t$seq,\t$qual\n";
+	    }
+	}
+    }
+}
+

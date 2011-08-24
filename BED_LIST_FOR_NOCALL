@@ -1,0 +1,87 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+BED_LIST_FOR_NOCALL -d ~/directory -f \"*.glob.gvf\" -o output_prefix
+
+Description:
+
+This script will generate a BED file for sites where a SNV/SNP/INDEL was called.
+
+";
+
+
+my ($help);
+my $directory;
+my $file_glob;
+my $output_prefix;
+
+my $opt_success = GetOptions('help'         =>\$help,
+			     "directory=s"  =>\$directory,
+			     "file_glob=s"  =>\$file_glob,
+			     "output=s"     =>\$output_prefix, 
+			     );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file_glob && $directory && $output_prefix;
+
+
+my %MUTATION_MAP;
+my @FILES = <$directory$file_glob>;
+Load_Mutations();
+Print_Bed();
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+sub Load_Mutations{
+    open(KEY, '>', $output_prefix.'.bed.file.key');
+    my $nfiles = scalar @FILES;
+    my $count = 0;
+    foreach my $file (@FILES){
+	print KEY "$file;$count\n";
+	$count++;
+        print STDERR "reading $file. $count of $nfiles\n";
+        open(FH, '<', $file);
+        while(<FH>){
+            next if /^(\s)*$/;
+            chomp;          
+            my($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
+               $attribute) = split(/\t/, $_);
+	    	    
+	    push @{$MUTATION_MAP{$seqid}{$start}{$strand}{$end}}, $count;
+	}
+    }
+    close FH;
+    close KEY;
+}
+#-------------------------------------------------------------------------------
+sub Print_Bed{
+    open(FH, '>', $output_prefix.'.bed');
+    foreach my $seqid (sort {$a cmp $b} keys %MUTATION_MAP){
+	foreach my $start (sort {$a <=> $b} keys %{$MUTATION_MAP{$seqid}}){
+	    foreach my $strand (sort {$a cmp $b} keys %{$MUTATION_MAP{$seqid}{$start}}){
+		my @ends = sort {$a <=> $b} keys %{$MUTATION_MAP{$seqid}{$start}{$strand}};
+		my @source;
+		foreach my $end (@ends){
+		    @source = (@source, @{$MUTATION_MAP{$seqid}{$start}{$strand}{$end}});
+		}
+		@source = sort {$a <=> $b} @source;
+		my $source = join(':', @source);
+		my $last_end = pop @ends;
+		print FH "$seqid\t$start\t$last_end\t$source\t$strand\t.\t.\t.\t.\t.\t.\t.\n";
+	    }
+	}
+    }
+    close FH;
+}

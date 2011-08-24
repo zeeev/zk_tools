@@ -1,0 +1,303 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Data::Dumper;
+use Getopt::Long;
+use Bit::Vector;
+no autovivification;
+use Devel::Size qw(size total_size);
+
+my $usage = "
+
+DON'T
+
+";
+srand(time);
+my ($help);
+my $directory;
+my $pattern;
+my $returns;
+my $compare;
+my $group_function;
+my $group_size;
+my $specify_group;
+my $boot_n;
+
+my $opt_success = GetOptions (
+
+			      'help' => \$help,
+			      "directory=s" => \$directory,
+			      "pattern=s" => \$pattern,
+			      'returns' => \$returns,
+			      'compare' => \$compare,
+			      "group_function=s" => \$group_function,
+			      "group_size=s" => \$group_size,
+			      "specify_group=s" => \$specify_group,
+			      "boot=s" => \$boot_n,
+			      );
+
+die $usage if $help || ! $opt_success;
+unless (-d $directory && $pattern && $returns || $compare || $specify_group){
+    die $usage;
+}
+
+
+my %ACTION = (
+	      Intersection => \&Intersection,
+	      Union        => \&Union,
+	      );
+
+my $BITS = 0;
+my %TOTAL_DATA;
+my %MUTATION_MAP;
+my %BIN_STRINGS;
+my @FILES = <$directory$pattern>;
+my @GROUP_SIZES = Parse_Multi_Commands($group_size);
+my @UORI        = Parse_Multi_Commands($group_function);
+my @GROUP_FILES = Parse_Multi_Commands($specify_group);
+
+
+Load_Mutations();
+Build_Bit_Vectors();
+Delete_Unused_Data();
+Handel_Specified_Group() if $specify_group;
+Boot_Returns()           if $returns && $boot_n;
+Boot_Compare()           if $compare && $boot_n;
+
+
+#-------------------------------------------------------------------------------
+sub Load_Mutations{
+    my $count = 0;
+    my $nfiles = scalar @FILES;
+    foreach my $file (@FILES){
+	$count++;
+	unless (-e $file){
+	    die "$file does not exist";
+	}
+
+	print STDERR "reading $file. $count of $nfiles\n";
+	open(FH, '<', $file);
+	
+	while(my $line = <FH>){
+	
+	    next if $line =~ /^(\s)*$/;
+	    chomp $line;
+	   
+	    my($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
+	       $attribute) = split(/\t/, $line);
+	    my %attributes = split /;|=/, $attribute;
+	    map {$_ = [split /,/, $_]} values %attributes;
+	    if($type =~ /SNV/){
+		my @snps =  @{$attributes{Variant_seq}};
+		my @ref = $attributes{Reference_seq};
+		my $true_ref = shift @ref;
+		my @uniq_snps  = grep(!/$true_ref/, @snps);
+		foreach my $snp (@uniq_snps){
+		    $TOTAL_DATA{$file}{$type}{$seqid}{$start}{$snp} = undef;
+		    $MUTATION_MAP{$type}{$seqid}{$start}{$snp} = undef;
+		}
+	    }
+	}
+    }
+    close FH;
+}
+
+#-------------------------------------------------------------------------------
+sub Delete_Unused_Data{
+    foreach my $file (@FILES){
+	delete $TOTAL_DATA{$file};
+	delete $MUTATION_MAP{$file};
+    }
+}
+#-------------------------------------------------------------------------------
+sub Fisher_Yates_Shuffle{
+    my $array = shift;
+    my $i; for ($i = @$array; --$i; ) {
+        my $j = int rand ($i+1);
+        next if $i == $j;
+        @$array[$i,$j] = @$array[$j,$i];
+    }
+}
+#-------------------------------------------------------------------------------
+sub Build_Bit_Vectors{
+    my $count = 0;
+    foreach my $file (@FILES){
+	$count++;
+	print STDERR "to bit: file # $count\n";
+	my $lstr;
+	foreach my $type (sort {$a cmp $b} keys %MUTATION_MAP){
+	    foreach my $seqid (sort {$a cmp $b} keys %{$MUTATION_MAP{$type}}){
+		foreach my $start (sort {$a <=> $b} keys %{$MUTATION_MAP{$type}{$seqid}}){
+		    foreach my $uniq_snp (sort {$a cmp $b} keys %{$MUTATION_MAP{$type}{$seqid}{$start}}){
+			if(!exists $TOTAL_DATA{$file}{$type}{$seqid}{$start}{$uniq_snp}){ 
+			    $lstr = $lstr.0;
+			}
+			else{
+			    $lstr = $lstr.1;
+			    delete $TOTAL_DATA{$file}{$type}{$seqid}{$start}{$uniq_snp}; 
+			}
+		    }
+		}
+	    }
+	}
+	$BITS = length $lstr;
+	my $vector = Bit::Vector->new($BITS);	
+	$vector->from_Bin($lstr);
+	$BIN_STRINGS{$file} = $vector;
+    }
+}
+#------------------------------------------------------------------------------- 
+sub Group_Randomly{
+    my $to_group = shift;
+    my @group;
+    my @temp_file_list = @FILES;
+    Fisher_Yates_Shuffle(\@temp_file_list);
+    for(my $i = 1; $i <= $to_group; $i++){
+	push(@group, shift @temp_file_list);
+    }
+    return \@group, \@temp_file_list;
+}
+#-------------------------------------------------------------------------------
+sub Get_Vectors{   
+    my $group = shift;
+    my @vectors;
+    foreach my $indv (@{$group}){	
+	my $vector = $BIN_STRINGS{$indv};
+	push(@vectors, $vector);    
+    }
+    return \@vectors;
+}
+#-------------------------------------------------------------------------------
+sub Union{
+    my $vectors = shift;
+    my $first_vector;
+    my $count = 0;
+    my $union = Bit::Vector->new($BITS);
+    foreach my $vector (@{$vectors}){
+	$union->Or($union, $vector);
+    }
+    return $union;
+}
+#-------------------------------------------------------------------------------
+sub Intersection{
+    my $vectors = shift;
+    my $first_vector;
+    my $count = 0;
+    my $intersection = Bit::Vector->new($BITS);
+    foreach my $vector (@{$vectors}){
+        $count++;
+	$intersection->Or($intersection, $vector) if $count == 1;
+	next if $count == 1;
+	$intersection->And($intersection, $vector);
+    }
+    return $intersection;
+}
+#-------------------------------------------------------------------------------
+sub Compare_Groups{
+    my $exclusion  = Bit::Vector->new($BITS);
+    my $target     = shift;
+    my $background = shift;
+    $exclusion->AndNot($target, $background);    
+    return $exclusion;
+}
+#------------------------------------------------------------------------------- 
+sub Boot_Compare{
+    my $count = 0;
+    my $read_files = scalar @FILES;
+    
+    for(my $j = 1; $j < 4; $j++){
+	print "#";
+	print "-" x 80;
+	print "\n";
+    }
+
+    print
+        "#analysis:\tmutations in $group_size files not found in all others\n#number of replicates:\t$boot_n\n#directory:\t$directory\n#number of files:\t$read_files\n\n";	
+    foreach my $uori (@UORI){
+	$count++;
+	print "group_size\treplicate\tprivate_mutations\tgroup_target_function\n" if $count ==1;
+	foreach my $current_group (@GROUP_SIZES){
+	    for(my $i = 1; $i <= $boot_n; $i++){
+		my ($target, $background) = Group_Randomly($current_group);
+		my $vtarget = Get_Vectors($target);
+		my $vbackground = Get_Vectors($background);
+		my $rtarget = $ACTION{$uori}->($vtarget);
+		my $rbackground = $ACTION{$uori}->($vbackground);
+		my $pbackground = $rbackground->to_Bin();
+		my $ptarget = $rtarget->to_Bin();
+		my $vector = Compare_Groups($rtarget, $rbackground);
+		my $pvector = $vector->to_Bin();
+		my $on_bits = $vector->Norm2();
+		print "$current_group\t$i\t$on_bits\t$uori\n";
+	    }
+	}                                                                      
+    }
+}
+#-------------------------------------------------------------------------------
+sub Process_Specified_Groups{   
+
+    my $target = shift;
+    my @target = @{$target};
+    my $group_name = shift;
+    my @background;
+    my $target_size = scalar @target;
+
+    foreach my $file (@FILES){	
+	next if grep /$file/, @target;
+	push @background, $file; 
+    }
+    foreach my $uori (@UORI){
+	my $vtarget = Get_Vectors(\@target);
+	my $vbackground = Get_Vectors(\@background);
+	my $utarget = $ACTION{$uori}->($vtarget);
+	my $ubackground = $ACTION{$uori}->($vbackground);
+	my $vector = Compare_Groups($utarget, $ubackground);
+	my $on_bits = $vector->Norm2();
+	print "#GROUP:\t$group_name\n";
+	foreach my $file (@target){
+	    print "#$file\n"
+	    }
+	
+	print "#Number of mutations found within $uori not in background:\t$on_bits\n";
+	print "#Group size:\t$target_size\n";
+    }
+    print "#";
+    print "-" x 80;
+    print "\n";
+}
+#-------------------------------------------------------------------------------
+sub Handel_Specified_Group{
+    foreach my $group (@GROUP_FILES){ 
+	my @files_in_group;
+	my $group_name;
+	my $count = 0;
+	open(FH, '<',$group);
+	while(<FH>){
+	    $count++;
+	    chomp;
+	    $group_name = $_ if /^\s*#/;
+	    $group_name =~ s/#//;
+	    next if $count == 1;
+	    push @files_in_group, $_;
+	}
+	close FH;
+
+
+	Process_Specified_Groups(\@files_in_group, $group_name);
+    }
+}
+#-------------------------------------------------------------------------------
+sub Parse_Multi_Commands{
+    my $arg = shift;
+    my @args;
+    if ($arg =~ /,/){
+	@args = split /,/, $arg;
+    }
+    else{
+	push @args, $arg;
+    }
+    return @args;
+}
+
+
+

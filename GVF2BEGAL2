@@ -1,0 +1,109 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+use List::MoreUtils qw{ uniq };
+
+
+no autovivification; # HOLY SHIT THAT TOOK FOREVER!
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+GVF2BEGAL -directory -pattern \"pattern\" must be in quotes to use wild card > output.file 
+
+Description:
+
+Given the full path to the working directory and the pattern (i.e. *.head, *.vcf.gvf, *.gvf)
+one BEAGLE input file is sent to standard out. The first row describes the alleles/indivdual
+in the population. The first column (in the first row) tells BEGALE that it is the indvidual 
+and the second column (id) is a place holder.  The subsequent rows contains the specific marker 
+ID and the genotype data for each allele/individual.  Tri-allelic sites are split over several 
+lines.";
+
+my ($help);
+my $directory;
+my $pattern;
+
+my $opt_success = GetOptions('help'     => \$help,
+			     'dir=s'    => \$directory,
+			     'pattern=s' => \$pattern,
+			     );
+
+die $usage if $help || ! $opt_success;
+die $usage unless defined $directory && defined $pattern; 
+
+my %LIST_OF_SITES;
+my %DATA;
+
+my @files = <$directory$pattern>;
+
+die $usage unless @files;
+
+load_genotypes(\@files);   
+Print_Begal_Header(\@files);
+Print_Begal_Data(\@files);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub load_genotypes {
+    my $files = shift;
+    foreach my $file (@{$files}){
+	open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+	while(<$IN>){
+	    next if /^(\s)*$/;
+	    chomp;	    
+	    my($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
+	       $attribute) = split(/\t/, $_);
+	    next unless $type eq 'SNV';
+	    my %attributes = split /;|=/, $attribute;
+	    map {$_ = [split /,/, $_]} values %attributes;
+	    my @ref = @{$attributes{Reference_seq}};
+	    my $true_ref  = $ref[0];
+	    my @snps      = sort @{$attributes{Variant_seq}};	
+	    my @uniq_snps = grep !/$true_ref/, uniq @snps;
+	    my $genotype  = scalar @snps == 1 ? 
+		$snps[0].':'.$snps[0] :
+		$snps[0].':'.$snps[1] ;
+	    $DATA{$file}{$seqid}{$start}   = $genotype;
+	    $LIST_OF_SITES{$seqid}{$start} = $true_ref;
+	}
+    }
+}
+#------------------------------------------------------------------------------                                                                         
+sub Print_Begal_Header{
+    my $files = shift;
+    print "I\tid";
+    foreach my $file (@{$files}){
+	my ($name) = split /\./, $file;
+	print "\t$name\t$name";
+    }
+    print "\n";
+}
+#-----------------------------------------------------------------------------  
+sub Print_Begal_Data{
+    my $files = shift;    
+    foreach my $seqid_keys (sort keys %LIST_OF_SITES){
+	foreach my $start_keys (sort {$a <=> $b} keys %{$LIST_OF_SITES{$seqid_keys}}){
+	    my $ref = $LIST_OF_SITES{$seqid_keys}{$start_keys};
+	    print "M\t$seqid_keys:$start_keys:$ref";
+	    foreach my $file (@{$files}){
+		if(exists $DATA{$file}{$seqid_keys}{$start_keys}){
+		    my $genotype = $DATA{$file}{$seqid_keys}{$start_keys};
+		    my ($genA, $genB) = split /:/, $genotype;
+		    print "\t$genA\t$genB";
+		    }
+		else{		    
+		    print "\t$ref\t$ref";
+		    }
+	    }
+	    print "\n";
+	}    
+    }
+}
+

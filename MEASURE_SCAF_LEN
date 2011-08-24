@@ -1,0 +1,71 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+pseudo_human_chr -s <reference.fasta> -p <mySamtools.pileup>
+
+Description:
+
+This program humanizes a pileup file coming from SAMTOOLS.  Using the 
+reference sequence it gleans the scaffolds/contigs/chromosomes and the corresponding
+lengths.  
+
+";
+
+
+my $seq_file;
+
+
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			     "sequence_file=s"=> \$seq_file,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+die $usage unless -r $seq_file;
+open (IN, '<', $seq_file) or die "Can't open $seq_file for reading\n$!\n";
+
+
+
+my $seqid;
+my %seq_info;
+my $total_len = 0 ;
+
+while (<IN>) {
+    contig_length($_);
+}
+
+
+##use this sub to print the info on contig and length...
+    
+sub contig_length{
+    
+    $_ = shift;    
+    
+    chomp;				     
+    if($_ =~ /^>/){			     
+	$_ =~ s/>//;
+	my @scaf = split(/\s/, $_);
+	$seqid = $scaf[0];
+    }					     
+    else{			
+	my $seq_len = length($_);
+	$seq_info{$seqid} = $seq_len;	     
+    }                                        
+}
+
+while(my ($key, $value) = each(%seq_info)){
+    print "$key\t$value\n"
+}
+
+#-----------------------------------------------------------------------------

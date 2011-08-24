@@ -1,0 +1,54 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+PARSE_GROUPS.pl -f with all names -numbs 1,2,3,5,32,oriental -dir ~/pigeon/ -group_name fuzzy
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+my $numbs;
+my $dir;
+my $file;
+my $group_name;
+my ($help);
+my $opt_success = GetOptions('help'         => \$help,
+			     "numbs=s"      => \$numbs,
+			     "file=s"       => \$file,
+			     "group_name=s" => \$group_name,
+			     "dir=s"         => \$dir,
+			     );
+
+die $usage if $help || ! $opt_success;
+
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+
+my @ids = split /,/, $numbs;
+
+print "#$group_name\n";
+ 
+while (my $line = <$IN>) {
+    chomp $line;
+    my ($numb, $file) = split /\t/, $line;
+    print "$dir$file\n" if grep /^$numb$/, @ids;
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+

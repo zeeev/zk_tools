@@ -1,0 +1,113 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+use Data::Dumper;
+use List::Uniq ':all';
+
+my %ref;
+my %bfh;
+
+my ($list_file, @files) = @ARGV;
+
+# Get the filename off of @ARGV first
+open(KEY, "<", $list_file) or die "Can't open $list_file\n";
+
+my %bird_files;
+
+#COLcalRAADIAAPE          Indian Fantail COLcalRAADIAAPE.pileup.snp.sca.gff 
+while(my $line = <KEY>){
+    next if $line =~ /^(\s)*$/;
+    chomp $line;
+    my ($file_name, $bird_name) = split /\t/, $line;
+    $bird_files{$file_name} = $bird_name;
+}
+close KEY;
+
+print Dumper(%bird_files);
+
+foreach my $file (@files){
+    
+    my ($file_prefix) = split /\./, $file;
+
+    my $pigeon_name = $bird_files{$file};
+
+    open(FILE1, "<$file") or die;
+    
+    while(<FILE1>){
+	next if /^(\s)*$/;
+	chomp;
+	my ($seqid, $source, $type, $start, $end, $score, $strand,$phase, $attrb_txt) = split /\t/;
+	$seqid =~ s/chr//;
+	my @splits = split /;|=/, $attrb_txt;
+	my $split_len = scalar @splits;
+	if($split_len % 2 ==0){
+	    my %attributes = split /;|=/, $attrb_txt;
+	    map {$_ = [split /,/, $_]} values %attributes;
+	    
+	    #ID=12345;Reference_seq=A;Variant_seq=A,C;
+	
+	    my $reference_seq = $attributes{Reference_seq}[0];
+	    my @variant_seqs  = @{$attributes{Variant_seq}};
+	    my $zygosity = $attributes{Genotype}[0];
+	    
+	    next if (scalar(grep(!/$reference_seq/, @variant_seqs)) > 1);
+	    
+	    my ($base) = grep(!/$reference_seq/, @variant_seqs);
+	    $zygosity = $zygosity eq 'heterozygous' ? 0 : 1;
+	    my $genotype = [$zygosity, $base];
+	    
+	    my $uni = join ',', ($seqid, $start ,$reference_seq);
+	    
+	    $bfh{$pigeon_name}{$uni} = $genotype;
+	    $ref{$uni}{$base} = undef;
+	}
+    }
+}
+close FILE1;
+
+$bfh{'REF'}{'none'} = undef;
+
+open(PED, '>', 'plink.in.ped');
+my @index = sort keys %ref;
+
+for my $pigeon (keys %bfh) {
+    print PED "POP\t$pigeon\t0\t0\tunknown\t0\t";
+    for my $uni (@index) {
+	my $count = scalar keys %{$ref{$uni}};
+	next if($count > 1);
+	    
+	my ($seqid, $start, $ref) = split(/,/, $uni);
+	my @basekeys = keys %{$ref{$uni}};
+	
+	if (exists $bfh{$pigeon}{$uni}){
+	    my $content = $bfh{$pigeon}{$uni};
+	    my ($zygosity, $pmutation) = @{$content};
+	    if($zygosity ==1){
+		print PED "$pmutation $pmutation "
+	    }
+	    else{
+		print PED "$ref $pmutation ";
+	    }
+	    #print PED $zygosity ==1 ? "$pmutation $pmutation " : "$ref $pmutation ";
+	}
+	else{
+	    print PED "$ref $ref ";
+	}	
+    }
+    print PED "\n";
+}
+close PED;
+
+open(MAP, '>','plink.in.map');
+
+for my $uni (@index){
+    my $count = scalar keys %{$ref{$uni}};
+    next if($count > 1);   
+    my($chr,$start,$ref) = split(/,/, $uni);
+    print MAP "$chr\t$chr:$start:$ref\t0\t$start\n";
+}
+close MAP;
+    
+
+    
+

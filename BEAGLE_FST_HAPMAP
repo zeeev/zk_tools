@@ -1,0 +1,151 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use Data::Dumper;
+use List::MoreUtils qw{ uniq };
+use Math::Complex;
+use Getopt::Long;
+use Math::Combinatorics;
+
+#This script will do FST for us using BEAGLE data.
+
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+
+my $usage = "
+
+Synopsis:
+
+BEAGLE_FST -begal_file -group_file 
+
+Description:
+
+";
+
+my ($help);
+my $begal_file;
+my $group_file;
+
+my $opt_success = GetOptions('help'     => \$help,
+                             'begal_file=s'    => \$begal_file,
+                             'group_file=s' => \$group_file,
+                             );
+
+die $usage if $help || ! $opt_success;
+die $usage unless defined $begal_file && defined $group_file; 
+
+my @TARGET;
+Load_Target();
+Load_Data();
+#--------------------------------------------------------------------------------
+sub Load_Data{    
+    open(FH,'<',$begal_file);    
+    my @column_names;
+    while(my $line = <FH>){
+	chomp $line;
+	$line = Rtrim($line);
+	if ($line =~ m/^I/){
+	    my @first_row = split /\t/, $line;
+	    @column_names = uniq @first_row;
+	    shift @column_names;
+	    shift @column_names;
+	    next;
+	}
+	my @genotypes = split /\t/, $line;
+	next unless scalar uniq @genotypes > 1;
+	my $crap   = shift @genotypes;
+	my @marker_info = split /:/, shift @genotypes;
+	my $total_counts;  
+	my $target_counts; 
+	my $target_b_counts; 
+	foreach my $col_name (@column_names){
+	    my @gens;
+	    push @gens, shift @genotypes;
+	    push @gens, shift @genotypes;
+	    my @s_gens = sort {$a cmp $b} @gens;
+	    if (grep {/$col_name/} @TARGET){	
+		$target_counts->{$s_gens[0]}++;
+		$target_counts->{$s_gens[1]}++;
+		$total_counts->{$s_gens[0]}++;
+		$total_counts->{$s_gens[1]}++;
+	    }
+	    else{
+		$total_counts->{$s_gens[0]}++;
+		$total_counts->{$s_gens[1]}++;
+		$target_b_counts->{$s_gens[0]}++;
+		$target_b_counts->{$s_gens[1]}++;
+	    }  
+	}
+
+	my $total_indv    = scalar @column_names;
+	my $target_indv   = scalar @TARGET;
+	my $target_b_indv = (scalar @column_names) - (scalar @TARGET);
+	my $Gt  = H($total_counts, $total_indv);
+	my $Gsa = H($target_counts, $target_indv);
+	my $Gsb = H($target_b_counts, $target_b_indv);
+	my $Wa  = W($Gsa, $target_indv);
+	my $Wb  = W($Gsb, $target_b_indv);
+	my $W   = $Wa+$Wb;
+	my @Ws  = ($target_indv, $target_b_indv);
+	my $Wt  = Wt(\@Ws);
+	my $fst = 1 - ($W / $Wt) / $Gt; 
+	print "$marker_info[0]\t$marker_info[1]\t$marker_info[2]\t$fst\n";
+    
+}
+    
+    close FH;
+}
+#-------------------------------------------------------------------------------- 
+sub Load_Target{
+    open(FH2,'<',$group_file);
+    my $count = 0; 
+    while(my $line = <FH2>){
+        $count++;
+	chomp $line;
+	my $group = $line if $count == 1;
+	push @TARGET, $line if $count > 1;
+	print "Group 1 for Fst:\t$group\n" if $count == 1;
+    }
+}
+#-------------------------------------------------------------------------------- 
+sub Rtrim{
+    my $string = shift;
+    $string =~ s/\s+$//;
+    $string=~s/\t+/\t/gs;
+    $string=~s/\n+/\n/gs;
+    $string=~s/ +/ /gs;
+    return $string;
+}
+#-------------------------------------------------------------------------------- 
+sub H{    
+    my $allele_counts = shift;
+    my $indviduals    = shift;    
+    my @sorted = sort { $allele_counts->{$a} cmp $allele_counts->{$b} } keys %{$allele_counts};
+    my $value = $allele_counts->{$sorted[0]};
+    my $maf = $value / (2*$indviduals); 
+    my $common_term =  2*(2*$indviduals / 2*$indviduals - 1) * $maf * (1 - $maf); 
+    return $common_term;
+}
+#-------------------------------------------------------------------------------- 
+sub W{
+    my $term       = shift;
+    my $indviduals = shift;
+    my $weight = factorial(2*$indviduals) / factorial(2) * factorial(2*$indviduals - 2);
+    my $Wa = $weight * $term;
+    return $Wa;
+}
+#-------------------------------------------------------------------------------- 
+sub Wt{
+
+    my $indviduals = shift;
+    my @indviduals = @{$indviduals};
+    my $total;
+    foreach my $indv (@indviduals){
+	my $weight = factorial(2*$indv) / factorial(2) * factorial(2*$indv - 2);
+	$total += $weight;
+    }
+    return $total;
+}

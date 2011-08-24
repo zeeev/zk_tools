@@ -1,0 +1,98 @@
+#!usr/bin/perl
+
+use warnings;
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+TableVAASTResults.pl --file VAAST.RESULTS
+
+Description:
+
+I table VAAST RC1 so dummies can read the output :-).
+I take several cutoffs including --gene, --rank, --p_value
+
+";
+
+my $file;
+my $gene;
+my $rank;
+my $p_value;
+my $sort_v;
+my ($help);
+my $opt_success = GetOptions (
+			     'help' => \$help,
+			     "file=s" => \$file,
+			     "gene=s" => \$gene,
+			     "rank=s" => \$rank,
+			     "p_value=s" => \$p_value,
+			     "sort_v=s" => \$sort_v,
+			     );
+
+die $usage if $help || ! $opt_success;
+
+die $usage unless -r $file;
+
+
+open(FH, '<', $file);
+
+my %results;
+my @result_contents;
+
+while(my $line =<FH>){
+    next if $line =~ /^\s*($|#)/;
+			   chomp $line;
+			   if($line =~ /^(>|RANK|SCORE|genome)/){
+			       push(@result_contents, $line);
+			       if(scalar @result_contents == 5){
+				   my $key = shift(@result_contents);
+				   my ($transcript, $gene) = split /\s/, $key;
+				   $transcript =~ s/>//;
+				   my @dat =  @result_contents;
+				   %{$results{$gene}{$transcript}} = map{split /:/, $_, 2} @dat; 
+				   @result_contents = ();
+			       }
+			   }
+		       }     
+
+    
+    print "GENE\tGENOME_PERMUTATION\tGENOME_PURMUTATION_CI\tSCORE\tRANK\n";
+    while(my($gene, $transcript) = each %results){ 
+	print "$gene\n";
+	foreach my $key(sort{$results{$a}->{$sort_v} <=> $results{$b}->{$sort_v}} keys %$transcript){
+	    print "$key\t";
+	    while(my($metric, $value) = each %{$transcript{$key}}){
+		"$value\t";
+	    }
+	    print "\n";
+	}
+    }
+
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+# DATA STRUCTURE:
+#    $VAR34529 = 'pigeon_16179';
+#    $VAR34530 = {
+#              'genome_permutation_p' => '1',
+#              'genome_permutation_0.95_ci' => '1,1',
+#              'SCORE' => '0.00000000',
+#              'RANK' => '16860'
+#	      };
+
+
+sub sort_it{
+    my $search = shift;
+    $results{$a}->{$search} cmp $results{$b}->{$search};
+
+}
+
