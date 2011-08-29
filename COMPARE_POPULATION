@@ -174,7 +174,9 @@ sub Union{
     my $count = 0;
     my $union = Bit::Vector->new($BITS);
     foreach my $vector (@{$vectors}){
-	$union->Or($union, $vector);
+	$count++;
+	$union = $vector->Clone() if $count == 1;
+	$union->Union($union, $vector);
     }
     return $union;
 }
@@ -186,9 +188,8 @@ sub Intersection{
     my $intersection = Bit::Vector->new($BITS);
     foreach my $vector (@{$vectors}){
         $count++;
-	$intersection->Or($intersection, $vector) if $count == 1;
-	next if $count == 1;
-	$intersection->And($intersection, $vector);
+	$intersection = $vector->Clone() if $count == 1;
+	$intersection->Intersection($intersection,$vector);
     }
     return $intersection;
 }
@@ -215,20 +216,20 @@ sub Boot_Compare{
         "#analysis:\tmutations in $group_size files not found in all others\n#number of replicates:\t$boot_n\n#directory:\t$directory\n#number of files:\t$read_files\n\n";	
     foreach my $uori (@UORI){
 	$count++;
-	print "group_size\treplicate\tprivate_mutations\tgroup_target_function\n" if $count ==1;
+	print "group_size\treplicate\tprior_to_background_removal\tprivate_mutations\tgroup_target_function\tgroup_background_function\n" if $count ==1;
 	foreach my $current_group (@GROUP_SIZES){
 	    for(my $i = 1; $i <= $boot_n; $i++){
 		my ($target, $background) = Group_Randomly($current_group);
 		my $vtarget = Get_Vectors($target);
 		my $vbackground = Get_Vectors($background);
 		my $rtarget = $ACTION{$uori}->($vtarget);
-		my $rbackground = $ACTION{$uori}->($vbackground);
-		my $pbackground = $rbackground->to_Bin();
-		my $ptarget = $rtarget->to_Bin();
-		my $vector = Compare_Groups($rtarget, $rbackground);
-		my $pvector = $vector->to_Bin();
-		my $on_bits = $vector->Norm2();
-		print "$current_group\t$i\t$on_bits\t$uori\n";
+		foreach my $uori_b (@UORI){
+		    my $rbackground = $ACTION{$uori_b}->($vbackground);
+		    my $vector3 = Compare_Groups($rtarget, $rbackground);
+		    my $on_bits = $vector3->Norm2();
+		    my $ptarget = $rtarget->Norm2();
+		    print "$current_group\t$i\t$ptarget\t$on_bits\t$uori\t$uori_b\n";
+		}
 	    }
 	}                                                                      
     }
