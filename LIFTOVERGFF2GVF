@@ -1,0 +1,51 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/LIFTOVERGFF2GVF <How the hell do you use this thing>
+
+Description:
+
+Designed to take my lift over psdeuo gvf and keep the new cordinates in the attribute line.
+Will skip mtMutations aka anything on chrM.
+";
+
+
+my ($help);
+my $file;
+my $opt_success = GetOptions('help'    => \$help,
+			     "file=s"  => \$file,
+    );
+
+die $usage if $help || ! $opt_success;
+
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+while (<$IN>) {
+    chomp;
+    my ($seqid, $source, $type, $start, $end, $score, $strand, 
+	$phase, $attribute) = split /\t/, $_;
+    my ($seqid_b, $source_b, $type_b, $start_b, $end_b, $score_b, $strand_b, 
+	$phase_b, $attribute_b) = split /%/, $attribute;
+
+    print "$seqid\t$source\t$type\t$start\t$end\t$score\t$strand\t$phase\t$attribute_b";
+    print "old_coord=$seqid_b:$start_b,$end_b;\n";
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub {
+
+}
+

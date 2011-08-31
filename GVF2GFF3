@@ -1,0 +1,63 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+GVF2GFF3 -d /directory/to/your/gvf -f MAH1.gvf or \"*.gvf\"
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+
+
+my ($help);
+my $directory;
+my $file_glob;
+my $output_prefix;
+
+my $opt_success = GetOptions('help'         =>\$help,
+                             "directory=s"  =>\$directory,
+                             "file_glob=s"  =>\$file_glob,
+    );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file_glob && $file_glob;
+
+my @FILES = <$directory$file_glob>;
+Load_Mutations();
+
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub Load_Mutations{
+    
+    my $nfiles = scalar @FILES;
+    my $count = 0;
+    foreach my $file (@FILES){
+        $count++;
+	open(FH, '<', $file) || die "cannot open $file";
+        while(<FH>){
+            next if /^(\s)*$/;
+	    chomp;          
+            my($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
+               $attribute) = split(/\t/, $_);
+	    print "$seqid\t$source\t$type\t$start\t$end\t$score\t$strand\t$phase\t$seqid%$source%$type%$start%$end%$score%$strand%$phase%$attribute\n";
+                    
+        }
+    }
+}
+
+
