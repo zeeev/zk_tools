@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/HEADER_GVF -g 1.06 -b /pathto/mycustom.build -f file.gvf -d 2011-09-1 -i indvidual5 -s female -pop mouse -c whatever you want to say
+
+Description:
+
+No really, how the hell do you use this thing!
+
+date must be in format YYY-MM-DD
+
+";
+
+
+my ($help);
+my $file;
+my $gvf_ver;
+my $date;
+my $build;
+my $indv;
+my $sex;
+my $pop;
+my $comments;
+my $opt_success = GetOptions('help'            => \$help,
+			     "file=s"         => \$file,
+			     "gvf_version=s"  => \$gvf_ver,
+			     "date=s"         => \$date,
+			     "indv=s"         => \$indv,
+			     "sex=s"          => \$sex,
+			     "population=s"   => \$pop,
+			     "build=s"        => \$build,
+			     "comments=s"     => \$comments
+    );
+
+
+die $usage if $help || ! $opt_success;
+
+die $usage unless $file;
+
+open (my $IN, '<', $file)  or die "Can't open $file for reading\n$!\n";
+open (my $FH, '<', $build) or die "Can't open $build for reading\n$!\n";
+
+my @SEQ_REGION;
+
+while(<$FH>){
+    chomp;
+    push @SEQ_REGION, $_;
+}
+
+print "##gvf-version $gvf_ver\n";
+print "##file-date Date=$date\n";
+print "##genome-build $build\n";
+print "##indvidual-id Dbxref=$indv;Gender=$sex;Population=$pop\n";
+foreach my $seq_r (@SEQ_REGION){
+    print "##sequence-region $seq_r\n";
+}
+
+print "\n";
+print "#$comments\n";
+print "\n";
+
+while (<$IN>) {
+    chomp;
+    print "$_\n";
+
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub {
+
+}
+
