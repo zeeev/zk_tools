@@ -1,0 +1,75 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+use Math::Complex;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/SAMTOOLS_DEPTH_STATS <How the hell do you use this thing>
+
+Description:
+
+The AVG and SD was validated using [R] and excell;
+
+";
+
+
+my ($help);
+my $feature;
+my $opt_success = GetOptions('help'    => \$help,
+			     "feature=s"   => \$feature,
+    );
+
+
+my %COUNTS;
+my $LINE_COUNT = 0;
+
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+
+my $sum;
+
+while (<$IN>) {
+    next if /^\s+/;
+    chomp;
+    $LINE_COUNT++;
+    my ($seqid, $pos, $coverage) = split /\t/, $_;
+    $COUNTS{$coverage}++;
+    $sum += $coverage;
+}
+
+my $avg = $sum / $LINE_COUNT;
+my $sd  = Sd($avg);
+my $se  = $sd / sqrt($LINE_COUNT);
+
+print "seq_id\taverage_depth\tst_dev\tst_errs\n";
+print "$feature\t$avg\t$sd\t$se\n";
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub Sd{
+    
+    my $avg = shift; 
+    my $sum_sq;
+    my $sq;
+    
+    while(my($k, $v) = each %COUNTS){
+	for(my $i = 1; $i <= $v; $i++){
+	    $sum_sq += ($k-$avg)**2
+	}
+    }
+    $sq = sqrt($sum_sq / $LINE_COUNT)
+}
