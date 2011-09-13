@@ -1,0 +1,148 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Math::CDF;
+use PDL;
+use PDL::LiteF;
+use PDL::Stats::Distr;
+use Data::Dumper;
+use Statistics::Basic::Mean;
+use Set::IntSpan::Fast;
+
+no autovivification;
+
+my %NO_CALL_POS;
+my %GVF;
+my $qcut = 100;
+
+my $file_a = shift;
+my $file_b = shift;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+Parse_Gvf($file_b);
+Process_Cut_Off($file_a);
+Print_Gvf();
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub Process_Cut_Off {
+    my $file = shift;
+    open(FH, '<', $file);
+    $/ = ">";
+    while (<FH>) {
+	my @a = split /\s+/,$_ if $_  ne '>';
+	my ($contig) = shift @a;
+	pop @a;
+	my $cutoff = Cut_Off(\@a);
+	No_Call_Pos(\@a, $contig, $cutoff);
+    }
+    close FH;
+}
+#-----------------------------------------------------------------------------
+sub Cut_Off{
+    
+    my $a = shift;
+    my $sum = 0;
+    my $count = 0;
+    
+    next if !defined $a;
+
+    foreach my $a(@{$a}){
+	$count++;
+	$sum += $a;
+    }
+    my $lambda = $sum / $count if $sum > 0;
+    $lambda = 0 if $sum == 0;
+    my $pcutoff = Math::CDF::qpois(0.98, $lambda) if $lambda > 0;
+    $pcutoff    = 0 if $lambda == 0;
+    return $pcutoff;
+}             
+
+#-----------------------------------------------------------------------------
+sub No_Call_Pos{
+    my $var    = shift;
+    my $contig = shift;
+    my $pcut   = shift;
+    my $count  = 0;
+    my @nocall = ();
+    my $set = Set::IntSpan::Fast->new();
+    foreach my $d (@{$var}){
+	push @nocall, $d if $d > $pcut || $d < 5;
+    }
+    $set->add(@nocall); 
+    my $ranges = $set->as_string();
+    Del_Range($contig, $ranges);
+}
+
+#-----------------------------------------------------------------------------
+
+sub Parse_Gvf{
+    my $file = shift;
+    open(FH, '<', $file);
+    while(<FH>){
+	chomp;
+	next if /^\s+/;
+	next if /#/;
+	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
+	    $attributes) = split /\t/, $_;
+	$GVF{$seqid}{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes";
+	
+    }
+    close FH;
+}
+
+#-----------------------------------------------------------------------------
+
+sub Del_Range{
+#   $GVF{$seqid}{$start}{$end}{$type} = "$source:$score:$strand:$attributes";
+    my $contig  = shift;
+    my $ranges  = shift;
+    my @ranges = split /,/, $ranges;
+    for my $range (@ranges){
+	my @ab_range;
+	if($range =~ /-/){
+	    @ab_range = split /-/, $range;
+	}else{
+	    @ab_range = ($range, $range);
+	}
+	for(my $i = $ab_range[0]; $i <= $ab_range[1]; $i++){
+	    delete $GVF{$contig}{$i};
+	}
+	GVF_Line($contig, \@ab_range);
+    }
+}
+
+#-----------------------------------------------------------------------------
+
+sub GVF_Line{
+    my $contig = shift;
+    my $range  = shift;
+    my @range = @{$range};
+    $GVF{$contig}{$range[0]}{$range[1]} = "gap\tno_call\t.\t.\t.\tID=$contig:$range[0]:$range[1];";    
+}
+    
+#-----------------------------------------------------------------------------
+
+sub Print_Gvf{
+   while(my($seqid, $start_hash) =  each %GVF){
+       foreach my $start (sort {$a <=> $b} keys %{$GVF{$seqid}}){
+	   foreach my $end (sort {$a <=> $b} keys %{$GVF{$seqid}{$start}}){
+	       my $value = $GVF{$seqid}{$start}{$end};
+	       my ($type, $source, $score, $strand, $phase, $attributes) = split /\t/, $value;
+	       if ($score !~ /\./ && $score < $qcut){
+		   $source = "no_call";
+		   $attributes =~ s/Variant_seq=.*?;/Variant_seq=^,^/;
+		   $attributes =~ s/Genotype=.*?;/Genotype=nocall/;
+	       }
+	       
+	       print "$seqid\t$source\t$type\t$start\t$end\t$score\t$strand\t$phase\t$attributes\n";
+	   }
+       }
+   }
+}
+
+#-----------------------------------------------------------------------------
+
