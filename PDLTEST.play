@@ -1,0 +1,86 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Math::Complex;
+use Math::GammaFunction qw/:all/;
+use Math::MatrixReal;
+use PDL::LiteF;
+use PDL::Stats::Distr;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+
+my @a = (1.7474439, 2.0434569, 3.4621117, 1.7166083, 0.6421170, 1.3665394, 
+	 0.5865015, 0.7201627, 0.9980636, 1.4048662, 0.7524565, 0.0847000,
+	 1.5335059, 2.7771396, 0.3259179, 0.3768162, 1.2013349, 0.6159063,
+	 3.6391856,2.0529129);
+
+my $vals = pdl @a;
+my ($shape, $scale) = $vals->mme_gamma();
+$shape = $shape->at();
+$scale = $scale->at();
+my $N = scalar @a;
+my $diff = 5;
+my $tolerance = .001;
+my $p = Math::MatrixReal->new_from_columns([[$shape,$scale]]);
+while($diff > $tolerance){
+    print $p;
+    my $up = $p -  Hessian($p,$N) * Gradient(\@a,$p,$N);
+    my $tmp_diff = $p - $up;
+    $diff = ($tmp_diff->element(1,1)**2 + $tmp_diff->element(2,1)**2)**(.5);
+    $p = $up;
+}
+
+
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub Xi_Sum{		      	
+    my $x_i = shift;	      	
+    my $x_i_sum = 0;	      	
+    foreach my $x (@{$x_i}){  	
+	$x_i_sum += $x;   	
+    }			      	
+    return $x_i_sum;	      	
+}                                                                                          
+#-----------------------------------------------------------------------------
+sub Xi_Ln_Sum{		      	
+    my $x_i = shift;	      	
+    my $x_i_sum = 0;	      	
+    foreach my $x (@{$x_i}){  	
+	$x_i_sum += ln($x);   	
+    }			      	
+    return $x_i_sum;	      	
+}                               
+#-----------------------------------------------------------------------------
+sub Gradient{
+    my $x_i   = shift;
+    my $p     = shift;
+    my $N     = shift;
+    
+    my $a = $p->element(1,1);
+    my $b = $p->element(2,1);
+
+    my $num    = $N * ln($b) - $N * psi($a) + Xi_Ln_Sum($x_i);
+    my $denum  = ($N * $a / $b) - Xi_Sum($x_i);
+    my $fd = Math::MatrixReal->new_from_cols([[$num,$denum]]);
+    return $fd;
+}
+#-----------------------------------------------------------------------------
+sub Hessian{
+    my $p       = shift;
+    my $N       = shift;
+
+    my $a = $p->element(1,1);
+    my $b = $p->element(2,1);
+
+    my $num_a   = -$N * psi_derivative($a, 1);
+    my $num_b   = $N / $b;
+    my $denum_b = -$N*$a/$b**2;
+    my $sd = Math::MatrixReal->new_from_cols([[$num_a,$num_b],[$num_b,$denum_b]]);
+    my $sd_i = $sd->inverse();
+    return $sd_i;
+}
