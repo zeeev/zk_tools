@@ -1,0 +1,61 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+RUN_MY_NOCALL -d depth.file.gz -r pileup.gz
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+my ($help);
+my $depth_zipped;
+my $raw_pileup_zipped;
+
+my $opt_success = GetOptions('help'         => \$help,
+			     'depth=s'      => \$depth_zipped,
+			     'raw_pileup=s' => \$raw_pileup_zipped,
+			     );
+
+
+die $usage if $help || ! $opt_success || !defined $depth_zipped && !defined $raw_pileup_zipped;
+
+
+die "$depth_zipped doesn't exist\n" if ! -e $depth_zipped;
+die "$raw_pileup_zipped doesn't exist\n" if ! -e $raw_pileup_zipped;
+
+system("gunzip $depth_zipped");
+system("gunzip $raw_pileup_zipped");
+
+
+$depth_zipped =~ s/\.gz//;
+$raw_pileup_zipped =~ s/\.gz//;
+
+
+system("feature2gff --parser samtools_pileup $raw_pileup_zipped --fasta ~/pigeon_project_2011_5_5/data/annotation/assembly/pigeonScaf.fixedlines.fasta > $raw_pileup_zipped.gvf");
+system("NO_CALL -c $depth_zipped -g $raw_pileup_zipped -d 5 -q 20 > $raw_pileup_zipped.final.gvf");
+system("gzip $raw_pileup_zipped.gvf");
+system("gzip $depth_zipped");
+system("gzip $raw_pileup_zipped"); 
+system("gzip $raw_pileup_zipped.final.gvf");
+
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub {
+
+}
+
