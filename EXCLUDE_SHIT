@@ -1,0 +1,62 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+EXCLUDE_SHIT -l list.of.things.to.keep.txt -d data.file.txt
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+my ($help);
+my $list;
+my $data;
+my $opt_success = GetOptions('help'    => \$help,
+			     "-l=s"    => \$list,
+			      );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $data && $list;
+
+my %SPREAD_SHEET;
+
+
+Read_List($list);
+Read_Data($data);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub Read_List{
+    my $file = shift;
+    open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";	     
+    my @list;
+    while (my $line =<$IN>) {								 
+	chomp $line;
+	push @list, $line;
+    }                                                                        
+    
+    close $IN;
+    return \@line;
+}
+
+#-----------------------------------------------------------------------------
+
+sub Read_data{
+    my $file = shift;
+    open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+    my @list;
+    while (my $line =<$IN>) {
+	chomp $line;
+	
