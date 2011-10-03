@@ -44,7 +44,7 @@ $raw_pileup_zipped =~ s/\.gz//;
 
 
 system("feature2gff --parser samtools_pileup $raw_pileup_zipped --fasta ~/pigeon_project_2011_5_5/data/annotation/assembly/pigeonScaf.fixedlines.fasta > $raw_pileup_zipped.gvf");
-system("NO_CALL -c $depth_zipped -g $raw_pileup_zipped -d 5 -q 20 > $raw_pileup_zipped.final.gvf");
+system("NO_CALL -c $depth_zipped -g $raw_pileup_zipped.gvf -d 5 -q 20 > $raw_pileup_zipped.final.gvf 2> $raw_pileup_zipped.error");
 system("gzip $raw_pileup_zipped.gvf");
 system("gzip $depth_zipped");
 system("gzip $raw_pileup_zipped"); 

@@ -8,21 +8,70 @@ use PDL::Stats::Distr;
 use Data::Dumper;
 use Statistics::Basic::Mean;
 use Set::IntSpan::Fast;
+use Getopt::Long;
+use Math::Round::Var;
+
 
 no autovivification;
 
+
+
+my $usage = "
+
+Synopsis:
+
+NO_CALL -c bgi.depth.file -g your.gvf -d 5 -q 15 
+
+Description:
+
+I will create no-call data for you on unfiltered gvfs including the low quality SNPs/INDELs. 
+Here are important things:
+
+1) Make sure you have coverage information for the entire gvf file you want to no call. 
+This script wont throw an error, but unknown depth regions wont be edited. 
+
+2) This scirpt takes the strange BGI depth format:  
+
+>chr1
+1 2 3 4 6 0 1 
+>chr2
+0 0 0 0 0 200
+
+I have a parser \"to_bgi_depth\" in my github tool repository that takes samtools generated depth files
+and converts the format.  
+
+";
+
+my ($help);
+my $bgi_depth;
+my $gvf;
+my $quality;
+my $depth;
+my $coverage;
+
+my $opt_success = GetOptions('help'       => \$help,
+                             "depth=s"    => \$depth,
+			     "coverage=s" => \$coverage,
+			     "gvf=s"      => \$gvf, 
+			     "quality=s"  => \$quality,
+                             );
+
+die $usage if $help || ! $opt_success;
+die $usage unless defined $gvf && defined $depth && defined $quality; 
+
+
 my %NO_CALL_POS;
 my %GVF;
-my $qcut = 100;
+my %CUTOFF_LOOKUP;
 
-my $file_a = shift;
-my $file_b = shift;
+
 
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
 #-----------------------------------------------------------------------------
-Parse_Gvf($file_b);
-Process_Cut_Off($file_a);
+Parse_Gvf($gvf);
+print STDERR "done loading gvf\n";
+Process_Cut_Off($coverage);
 Print_Gvf();
 
 #-----------------------------------------------------------------------------
@@ -30,35 +79,50 @@ Print_Gvf();
 #-----------------------------------------------------------------------------
 sub Process_Cut_Off {
     my $file = shift;
-    open(FH, '<', $file);
+    open(FH, '<', $file) || die "cannot open $file for reading!\n";
     $/ = ">";
-    while (<FH>) {
-	my @a = split /\s+/,$_ if $_  ne '>';
-	my ($contig) = shift @a;
+    my $count = 0;
+    while (my $line = <FH>) {
+	$count++;
+	next if $count ==1;
+	my @a = split /\s+/,$line if $line  ne '>';
+       	my ($contig) = shift @a;
+	print STDERR "working on the feature $contig\n";
 	pop @a;
-	my $cutoff = Cut_Off(\@a);
+	my $lambda = Cut_Off(\@a);
+	my $cutoff = $CUTOFF_LOOKUP{$lambda};
 	No_Call_Pos(\@a, $contig, $cutoff);
     }
     close FH;
+    $/ = '\n';
 }
 #-----------------------------------------------------------------------------
 sub Cut_Off{
-    
-    my $a = shift;
-    my $sum = 0;
-    my $count = 0;
+        
+    my $a      = shift;
+    my $sum    = 0;
+    my $count  = 0;
     
     next if !defined $a;
 
-    foreach my $a(@{$a}){
+    foreach my $b(@{$a}){
+	next if $b < 10;
 	$count++;
-	$sum += $a;
+	$sum += $b;
     }
+    
+    my $rnd = Math::Round::Var->new(0.1);
+    
     my $lambda = $sum / $count if $sum > 0;
     $lambda = 0 if $sum == 0;
-    my $pcutoff = Math::CDF::qpois(0.98, $lambda) if $lambda > 0;
-    $pcutoff    = 0 if $lambda == 0;
-    return $pcutoff;
+    $lambda = $rnd->round($lambda);
+    return $lambda if exists $CUTOFF_LOOKUP{$lambda};
+    my $pcutoff;
+    $pcutoff = Math::CDF::qpois(0.98, $lambda) if $lambda > 0;
+    $pcutoff = 0 if $lambda == 0;
+    $pcutoff = $rnd->round($pcutoff);
+    $CUTOFF_LOOKUP{$lambda} = $pcutoff;
+    return $lambda;
 }             
 
 #-----------------------------------------------------------------------------
@@ -70,7 +134,9 @@ sub No_Call_Pos{
     my @nocall = ();
     my $set = Set::IntSpan::Fast->new();
     foreach my $d (@{$var}){
-	push @nocall, $d if $d > $pcut || $d < 5;
+	$count++;
+	push @nocall, $count if $d > $pcut || $d < $depth;
+	#print "$pcut\t$d\t$count\n" if $d > 100;
     }
     $set->add(@nocall); 
     my $ranges = $set->as_string();
@@ -97,10 +163,11 @@ sub Parse_Gvf{
 #-----------------------------------------------------------------------------
 
 sub Del_Range{
-#   $GVF{$seqid}{$start}{$end}{$type} = "$source:$score:$strand:$attributes";
+
     my $contig  = shift;
     my $ranges  = shift;
     my @ranges = split /,/, $ranges;
+    
     for my $range (@ranges){
 	my @ab_range;
 	if($range =~ /-/){
@@ -132,10 +199,10 @@ sub Print_Gvf{
 	   foreach my $end (sort {$a <=> $b} keys %{$GVF{$seqid}{$start}}){
 	       my $value = $GVF{$seqid}{$start}{$end};
 	       my ($type, $source, $score, $strand, $phase, $attributes) = split /\t/, $value;
-	       if ($score !~ /\./ && $score < $qcut){
+	       if ($score !~ /\./ && $score < $quality){
 		   $source = "no_call";
-		   $attributes =~ s/Variant_seq=.*?;/Variant_seq=^,^/;
-		   $attributes =~ s/Genotype=.*?;/Genotype=nocall/;
+		   $attributes =~ s/Variant_seq=.*?;/Variant_seq=^;/;
+		   $attributes =~ s/Genotype=.*?;/Genotype=0:0;/;
 	       }
 	       
 	       print "$seqid\t$source\t$type\t$start\t$end\t$score\t$strand\t$phase\t$attributes\n";
