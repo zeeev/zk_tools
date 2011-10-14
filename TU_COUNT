@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Set::IntSpan::Fast;
+use Data::Dumper;
+use List::MoreUtils qw{
+        any all none notall true false
+        firstidx first_index lastidx last_index
+        insert_after insert_after_string
+        apply indexes
+        after after_incl before before_incl
+        firstval first_value lastval last_value
+        each_array each_arrayref
+        pairwise natatime
+        mesh zip uniq distinct minmax part
+};
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+TU_COUNT -f my.vaast -t run title
+
+Description:
+
+Will bin the TU data
+
+";
+
+
+my ($help);
+my $file;
+my $title;
+my $opt_success = GetOptions('help'     => \$help,
+			      "file=s"  => \$file,
+			      "title=s" => \$title,
+);
+
+die $usage if $help || ! $opt_success;
+
+
+my %COUNTS;
+my %POS;
+
+die $usage unless $file && defined $title;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+while (my $l = <$IN>) {
+    chomp $l;
+    next unless $l =~ /^TU/;
+    my @l = split /\s+/, $l;
+    next if exists $POS{$l[2]};
+    my $len = scalar @l;
+    my @genotypes = grep /N\|[0-9]/, @l;
+    foreach my $g (@genotypes){
+	Process_Genotype($g, $l[3]);
+    }
+    $POS{$l[2]};
+}
+Print_Data();
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub Process_Genotype{
+    my $g   = shift;    
+    my $ref = shift;
+
+    print STDERR "$g\n";
+    my $set = Set::IntSpan::Fast->new();
+    my ($ref_base) = split /\|/, $ref;
+    my ($_, $group, $genotype) = split /\|/, $g;
+    my @indvs = split /,|-/, $group;    
+    $set->add(@indvs);
+    my $n_indv = $set->cardinality();
+    my @gen = split /:/, $genotype;
+    my @no_ref = grep !/$ref_base/, @gen;
+    
+    my $non_ref_count = scalar @no_ref == 1 ? $n_indv *2 : $n_indv; 
+    $COUNTS{$non_ref_count}++;
+}
+#-----------------------------------------------------------------------------
+sub Print_Data{
+    print "TITLE:\t$title\n";
+    print "NON_REF_ALLELES_PER_LOCI\tCOUNT\n";
+    foreach my $key (sort {$a <=> $b} keys %COUNTS){
+	my $value = $COUNTS{$key};
+	$value = $value + 1; 
+	print "$key\t$value\n"; 
+    }
+}
+#-----------------------------------------------------------------------------
