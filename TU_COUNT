@@ -77,19 +77,25 @@ sub Process_Genotype{
     $set->add(@indvs);
     my $n_indv = $set->cardinality();
     my @gen = split /:/, $genotype;
+    my @uniq_bases = uniq @gen;
     my @no_ref = grep !/$ref_base/, @gen;
     
-    my $non_ref_count = scalar @no_ref == 1 ? $n_indv *2 : $n_indv; 
-    $COUNTS{$non_ref_count}++;
+    my $non_ref_count = scalar @no_ref == 1 ? $n_indv * 2 : $n_indv; 
+    $COUNTS{HOM}{$non_ref_count}++ if scalar @uniq_bases == 1;
+    $COUNTS{HET}{$non_ref_count}++ if scalar @uniq_bases == 2;
+    
+    
 }
 #-----------------------------------------------------------------------------
 sub Print_Data{
     print "TITLE:\t$title\n";
-    print "NON_REF_ALLELES_PER_LOCI\tCOUNT\n";
-    foreach my $key (sort {$a <=> $b} keys %COUNTS){
-	my $value = $COUNTS{$key};
-	$value = $value + 1; 
-	print "$key\t$value\n"; 
+    print "ZYGOSITY\tNON_REF_ALLELES_PER_LOCI\tCOUNT\n";
+    foreach my $zy (sort {$a cmp $b} keys %COUNTS){
+	foreach my $key (sort {$a <=> $b} keys %{$COUNTS{$zy}}){
+	    my $value = $COUNTS{$zy}{$key};
+	    $value = $value + 1; 
+	    print "$zy\t$key\t$value\n"; 
+	}
     }
 }
 #-----------------------------------------------------------------------------
