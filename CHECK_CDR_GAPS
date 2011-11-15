@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Tabix;
+use Set::IntSpan::Fast;
+use Set::IntervalTree;
+use Data::Dumper;
+use File::Glob ':glob';
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/CHECK_CDR_GAPS  -c file.cdr \*.gvf.gz
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+my $cdr;
+my ($help);
+my $opt_success = GetOptions('help'       => \$help, 
+			     "cdr=s"      => \$cdr,
+    );
+
+
+
+die $usage if $help || ! $opt_success;
+die $usage unless $cdr;
+
+
+my %FILE_KEY;
+my @PRAGMA;
+my @FILES = @ARGV;
+
+Parse_Pragma($cdr);
+$cdr = "$cdr\.gz";
+
+my $c_t = Tabix->new(-data=>$cdr);
+my @features = $c_t->getnames();
+
+foreach my $feature (@features){
+    next unless defined $feature;
+    my $gap_by_feature = Build_Trees($feature);
+    Process_Results($feature, $gap_by_feature);
+}
+
+Print_Pragma();
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub Build_Trees{
+    my $feature = shift;
+    my $tree = Set::IntervalTree->new;
+    foreach my $f (@FILES){
+	print STDERR "INFO: PROCESSING GAPS ON: $f\n";
+	my $t    = Tabix->new(-data=>$f);
+	my $iter = $t->query($feature);
+	while(my $l = $t->read($iter)){
+	    chomp $l;
+	    my @l = split /\t/, $l;
+	    next unless $l[2] eq 'gap';
+	    my ($fkey) = $f =~ /(.*?)\.gz/; 
+	    die "$f doesn't match anything in the cdr" if !defined $FILE_KEY{$fkey};
+	    $tree->insert($FILE_KEY{$fkey}, $l[3], $l[4])
+	}
+   }
+    return $tree;
+}
+
+#-----------------------------------------------------------------------------
+sub Process_Results{
+    my($feature, $gap_by_feature) = @_;
+    my $t    = Tabix->new(-data=>$cdr);
+    my $iter = $t->query($feature);
+    while(my $l = $t->read($iter)){
+	chomp $l;
+	my @l = split /\t/, $l;
+	foreach my $z (@l){
+	    die "This line isn't defined $l" if ! defined $z;
+	}  
+	my $nocall = Lookup_Indvs_Range($gap_by_feature, $l[1], $l[2]);
+	if (defined @{$nocall}[0]){
+	    Add_No_Call(\@l, $nocall, $feature);
+	}
+	else{
+	    print "$l\n";
+	}
+    }
+}
+#-----------------------------------------------------------------------------
+sub Lookup_Indvs_Range{
+    my ($tree, $b, $e) = @_;
+    my $results = $tree->fetch($b, $e);
+    return $results;
+}
+#-----------------------------------------------------------------------------
+sub Add_No_Call {
+    my ($l, $nocall, $feature) = @_;
+    my $gen = '^:1';
+    $gen = '^:^' if $feature !~ /chrY/;
+
+    my $existing_nocall;
+    for(my $i = 6; $i <= scalar @{$l} - 1; $i++){
+	if(@{$l}[$i] =~ /\^/){
+	    $existing_nocall = @{$l}[$i];
+	    delete @{$l}[$i];
+	}	
+    }
+
+    if(defined $existing_nocall){
+	my ($indvs) = split /\|/, $existing_nocall;
+	push @{$nocall}, split /,/, $indvs;
+	my $nc = join ", ", @{$nocall};
+	my $set = Set::IntSpan::Fast->new();
+	$set->add_from_string($nc);
+	my $formatted_indvs = $set->as_string();
+	@{$l}[scalar @{$l}] = "$formatted_indvs|$gen";
+	$set->empty();
+    }
+    else{
+	my $nc = join ", ", @{$nocall};
+	my $set = Set::IntSpan::Fast->new();
+	$set->add_from_string($nc);
+	my $formatted_indvs = $set->as_string();
+	@{$l}[scalar @{$l}] = "$formatted_indvs|$gen";
+	$set->empty();
+    }
+    print join "\t", @{$l};
+    print "\n";
+}
+#-----------------------------------------------------------------------------
+sub Parse_Pragma{
+    my $file = shift;
+    open(FH, '<', $file) || die "cannot open $file\n";
+    while(my $l = <FH>){
+	chomp $l;
+	next unless $l =~ /##/;
+	push @PRAGMA, $l;
+	if($l =~ /FILE-INDEX/){
+	    my @l = split /\t/, $l;
+	    $FILE_KEY{$l[3]} = $l[2];
+	}
+    }
+    close FH;
+    system "bgzip $file";
+    system "tabix -s 1 -b 2 -e 3 $file.gz";
+}
+#-----------------------------------------------------------------------------
+sub Print_Pragma{
+    foreach my $l (@PRAGMA){
+	print "$l\n";
+    }
+}
+#-----------------------------------------------------------------------------
