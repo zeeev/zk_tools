@@ -46,10 +46,13 @@ $cdr = "$cdr\.gz";
 my $c_t = Tabix->new(-data=>$cdr);
 my @features = $c_t->getnames();
 
+my $total = scalar @features;
+my $count = 0;
 foreach my $feature (@features){
     next unless defined $feature;
+    $count++;
     my $gap_by_feature = Build_Trees($feature);
-    Process_Results($feature, $gap_by_feature);
+    Process_Results($feature, $gap_by_feature, $count);
 }
 
 Print_Pragma();
@@ -62,7 +65,6 @@ sub Build_Trees{
     my $feature = shift;
     my $tree = Set::IntervalTree->new;
     foreach my $f (@FILES){
-	print STDERR "INFO: PROCESSING GAPS ON: $f\n";
 	my $t    = Tabix->new(-data=>$f);
 	my $iter = $t->query($feature);
 	while(my $l = $t->read($iter)){
@@ -80,6 +82,8 @@ sub Build_Trees{
 #-----------------------------------------------------------------------------
 sub Process_Results{
     my($feature, $gap_by_feature) = @_;
+    
+    print STDERR  "currently: $feature\t $count::$total\n"; 
     my $t    = Tabix->new(-data=>$cdr);
     my $iter = $t->query($feature);
     while(my $l = $t->read($iter)){
