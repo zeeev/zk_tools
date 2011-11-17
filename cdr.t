@@ -35,8 +35,14 @@ die $usage unless $file;
 my $cdr = CDR->new('file' => $file);
 my $whatever = $cdr->Get_Seqids();
 my $pragma = $cdr->Get_Pragma();
-my $seqids = $cdr->Get_Seqids();
-$cdr->Query_Range('chr1');
+my @seqids = @{$cdr->Get_Seqids()};
+foreach my $s (@seqids){
+    $cdr->Query_Range($s);    
+}
+
+
+
+
 #-----------------------------------------------------------------------------
 #-------------------------------- SUBROUTINES --------------------------------
 #-----------------------------------------------------------------------------

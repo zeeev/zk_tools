@@ -213,8 +213,8 @@ sub handle_message {
 sub _Load_Seqids{
     my $self   = shift;
     my $t      = Tabix->new(-data => $self->{'file'});
-    my $seqids = $t->getnames(); 
-    $self->{'seqids'} = $seqids;
+    my @seqids = $t->getnames(); 
+    $self->{'seqids'} = \@seqids;
 }
 
 #-----------------------------------------------------------------------------   
@@ -467,8 +467,8 @@ sub HWE_Departure{
 #-----------------------------------------------------------------------------   
 sub Rid_No_Call_Only{
 
-    $self = shift;
-    if
+#    $self = shift;
+#    if
     
 
 
