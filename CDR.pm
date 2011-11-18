@@ -218,6 +218,7 @@ sub _Load_Seqids{
 }
 
 #-----------------------------------------------------------------------------   
+
 sub _Parse_Pragma{  
     my $self = shift;    
 	my @pragma;
@@ -254,6 +255,7 @@ sub Get_Seqids {
 }
 
 #-----------------------------------------------------------------------------   
+
 sub Query_Range {
     my ($self, $args) = @_;
     my $t = Tabix->new(-data => $self->{'file'});
@@ -261,14 +263,25 @@ sub Query_Range {
     while(my $l = $t->read($i)){
 	$self->{'line'}{'raw'} = $l;
 	$self->_Parse_Line;
-	$self->Genotype_Counting;
-	$self->Expected_Hetrozygosity;
-	#$self->HWE_Departure;
+	next if !defined $self->{'line'}{'genotypes'};
+	$self->_Scrub_No_Call;
     }
+    $self->_Print_Pragma;
+}
+
+
+#-----------------------------------------------------------------------------   
+
+sub _Parse_Line{
+    my $self = shift;
+    $self->_Parse_Raw_Line;
+    $self->_Parse_Genotype;
+    $self->_Parse_Reference_Genotypes;
 }
 
 #-----------------------------------------------------------------------------   
-sub _Parse_Line{
+
+sub _Parse_Raw_Line{
 
     my $self = shift;
     my %lc;
@@ -279,15 +292,13 @@ sub _Parse_Line{
     $lc{'type'}   = shift @l;
     $lc{'effect'} = shift @l;
     $lc{'ref'}    = _Parse_Ref(shift @l);
-
     $self->{'line'}{'refined'} = \%lc;
     $self->{'line'}{'raw_genotypes'} = \@l;
 
-    $self->_Parse_Genotype;
-    $self->_Load_Reference_Genotypes;
 }	       
 
 #-----------------------------------------------------------------------------   
+
 sub _Parse_Ref{
     my $ref = shift;
     my @ref;
@@ -312,7 +323,8 @@ sub _Parse_Genotype{
 	my $set = Set::IntSpan::Fast->new();
         $set->add_from_string($g[0]);
 	foreach my $i ($set->as_array){
-	    die "overlapping genotypes : $self->{'line'}{'raw'}" if exists $genotype{$i}{'genotype'};
+	    print STDERR "overlapping genotypes : $self->{'line'}{'raw'}\n" if exists $genotype{$i}{'genotype'};
+	    return if exists $genotype{$i}{'genotype'};
 	    $genotype{$i}{'genotype'} = join ":", sort {$a cmp $b} split /:/, $g[1];
 	    $genotype{$i}{'effect'} = $g[2];
 	}
@@ -321,7 +333,7 @@ sub _Parse_Genotype{
 }
 
 #-----------------------------------------------------------------------------   
-sub _Load_Reference_Genotypes{
+sub _Parse_Reference_Genotypes{
    
     my $self  = shift;
     while(my($key, $file) = each %{$self->{'file_keys'}}){
@@ -339,35 +351,39 @@ sub _Load_Reference_Genotypes{
     
 #-----------------------------------------------------------------------------   
 
-sub HapMap_FST{
+sub _Parse_Alleles{
 
-    my $self = shift;
-    my @alleles = sort {$a cmp $b} keys %{$self->{'allele_counts'}};
-    return if scalar grep {!/^/} @alleles >  2;
-    return if scalar grep {!/^/} @alleles == 1;
-    my $total_alleles = $self->{'allele_counts'}{$alleles[0]} + $self->{'allele_counts'}{$alleles[1]};
-    
+    my $genotypes = shift;
+    my @genotypes;
+
+
+    while(my ($indv, $g) = each %{$genotypes}){
+	while(my ($info, $d) = each %{$g}){
+	    push @genotypes, $d if $info eq 'genotype';
+	}
+    }
+    return \@genotypes;
 }
 
 #-----------------------------------------------------------------------------   
 
-sub Genotype_Counting{
+sub _Count_Genotypes{
 
-    my $self = shift;
+    my $info_hash = shift;
+
     my %allele_counts;
     my %genotype_counts;
 
-
-    while(my($indv, $info_hash) = each %{$self->{'line'}{'genotypes'}}){
-	while( my($info, $value) = each %{$info_hash}){
-	    if ($info =~ /genotype/){
-		my @gen = split /:/, $value;
+    while( my($info, $value) = each %{$info_hash}){
+	while(my($key, $value_2) = each %{$value}){
+	    if ($key =~ /genotype/){
+		my @gen = split /:/, $value_2;
 		map {$allele_counts{$_}++} @gen;
-		$genotype_counts{$value}++;
+		$genotype_counts{$value_2}++;
 	    }
 	}
     }
-
+    
     my %total;
 
     while( my ($key, $value) = each %genotype_counts){
@@ -379,15 +395,14 @@ sub Genotype_Counting{
 	$total{'allele_counts'}{'nocall'} += $value if $key =~ /\^/;
 	$total{'allele_counts'}{'called'} += $value if $key !~ /\^/;
     }
-    
-    $self->{'genotype_counts'} = \%genotype_counts;
-    $self->{'allele_counts'}   = \%allele_counts;
-    $self->{'total_counts'}    = \%total;
-    my @alleles = sort {$a cmp $b} keys %{$self->{'allele_counts'}};
-    $self->{'alleles'} = \@alleles;
+
+    return (\%total, \%allele_counts);
 }
+
 #-----------------------------------------------------------------------------   
+
 sub Expected_Hetrozygosity{
+
     my $self = shift;
     
     my @alleles = @{$self->{'alleles'}};
@@ -461,29 +476,81 @@ sub HWE_Departure{
     }
 } 
 
+#-----------------------------------------------------------------------------   
+
+sub FST{
+
+    my ($self, $groups) = @_;
+    $self->_Group($groups);
+    my ($a_t_counts, $a_a_counts) = _Count_Genotypes($self->{'line'}{'group_A'});
+    my ($b_t_counts,   $b_b_counts) = _Count_Genotypes($self->{'line'}{'group_B'});
+
+    my $n_ij_a = $a_t_counts->{'allele_counts'}{'called'}; 
+    my $n_ij_b = $b_t_counts->{'allele_counts'}{'called'};
+}
+
+#-----------------------------------------------------------------------------   
+
+sub _Group{
+
+    my %groupA;
+    my %groupB;
+
+    my %groupA_DAT;
+    my %groupB_DAT;
+
+    my ($self, $groups) = @_;
+    
+    foreach my $i (@{$groups}){
+	$groupA{$i} = 1;
+    }
+    
+    while(my($indv, $indv_hash) = each %{$self->{'line'}{'genotypes'}}){
+	if (exists $groupA{$indv}){
+	    $groupA_DAT{$indv} = $indv_hash;
+	}
+	else{
+	    $groupB_DAT{$indv} = $indv_hash;
+	} 
+    }
+    $self->{'line'}{'group_A'} = \%groupA_DAT;
+    $self->{'line'}{'group_B'} = \%groupB_DAT; 
+}
+
+#-----------------------------------------------------------------------------   
+
+sub _Scrub_No_Call{
+
+    my $self    = shift;
+    my $alleles = _Parse_Alleles($self->{'line'}{'genotypes'});
+    return if scalar @{$alleles} == 1 && grep {/\^/} @{$alleles};
+    $self->_Print_Line;
+}
+	
+#-----------------------------------------------------------------------------   
+
+sub _Print_Line{
+    my $self = shift;
+    print "$self->{'line'}{'raw'}\n";
+
+}
+
+#-----------------------------------------------------------------------------   
+
+sub _Print_Pragma {
+    my $self = shift;   
+    my @pragma = @{$self->{'pragma'}};
+    foreach my $p (@pragma){
+	print "$p\n";
+    }
+}
+
+
+
+
+
+
 
 1;
 
-#-----------------------------------------------------------------------------   
 
-sub Rid_No_Call_Only{
-
-<<<<<<< HEAD
-    my $self = shift;
-
-}
-
-#-----------------------------------------------------------------------------   
-
-sub Group{
-
-=======
-#    $self = shift;
-#    if
-    
->>>>>>> 13aba8a0f35b3cb3f8ba13439486c0d96c7d9221
-
-
-
-
-}
