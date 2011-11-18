@@ -48,8 +48,8 @@ my @features = $c_t->getnames();
 
 my $total = scalar @features;
 my $count = 0;
-foreach my $feature (@features){
-    next unless defined $feature;
+FEATURE: foreach my $feature (@features){
+    next FEATURE unless defined $feature;
     $count++;
     my $gap_by_feature = Build_Trees($feature);
     Process_Results($feature, $gap_by_feature, $count);
@@ -64,13 +64,13 @@ Print_Pragma();
 sub Build_Trees{
     my $feature = shift;
     my $tree = Set::IntervalTree->new;
-    foreach my $f (@FILES){
+    FILE: foreach my $f (@FILES){
 	my $t    = Tabix->new(-data=>$f);
 	my $iter = $t->query($feature);
-	while(my $l = $t->read($iter)){
+	LINE: while(my $l = $t->read($iter)){
 	    chomp $l;
 	    my @l = split /\t/, $l;
-	    next unless $l[2] eq 'gap';
+	    next LINE unless $l[2] eq 'gap';
 	    my ($fkey) = $f =~ /(.*?)\.gz/; 
 	    die "$f doesn't match anything in the cdr" if !defined $FILE_KEY{$fkey};
 	    $tree->insert($FILE_KEY{$fkey}, $l[3], $l[4])
@@ -129,6 +129,7 @@ sub Add_No_Call {
     if(defined $existing_nocall){
 	my ($indvs) = split /\|/, $existing_nocall;
 	my $e_set = Set::IntSpan::Fast->new();
+	$e_set->add_from_string($indvs);
 	push @{$nocall}, $e_set->as_array();
 	$e_set->empty;
 	my $set = Set::IntSpan::Fast->new();
@@ -151,9 +152,9 @@ sub Add_No_Call {
 sub Parse_Pragma{
     my $file = shift;
     open(FH, '<', $file) || die "cannot open $file\n";
-    while(my $l = <FH>){
+    SLINE: while(my $l = <FH>){
 	chomp $l;
-	next unless $l =~ /##/;
+	next SLINE unless $l =~ /##/;
 	push @PRAGMA, $l;
 	if($l =~ /FILE-INDEX/){
 	    my @l = split /\t/, $l;
