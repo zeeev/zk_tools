@@ -386,7 +386,7 @@ sub _Count_Genotypes{
 	while(my($key, $value_2) = each %{$value}){
 	    if ($key =~ /genotype/){
 		my @gen = split /:/, $value_2;
-		map {$allele_counts{$_}++} @gen;
+		map {$allele_counts{$_}++} @gen; 
 		$genotype_counts{$value_2}++;
 	    }
 	}
@@ -484,45 +484,40 @@ sub FST{
 
     my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
     return if scalar (grep {!/\^/} @alleles) == 1;
-    return if scalar (grep {!/\^/} @alleles) > 2;
 
     $self->_Group($groups);
     my ($a_t_counts, $a_a_counts)      = _Count_Genotypes($self->{'line'}{'group_A'});
     my ($b_t_counts, $b_a_counts)      = _Count_Genotypes($self->{'line'}{'group_B'});
     my ($total_counts, $total_alleles) = _Count_Genotypes($self->{'line'}{'genotypes'});
 
-    my ($A,$B) = keys %{$total_alleles};
-    my $a_c    = $total_alleles->{$A};
-    my $b_c    = $total_alleles->{$B};
+    my $ma = _sort_by_increasing_vals($total_alleles);
     
-    my $minor_allele = $a_c < $b_c ? $A : $B;
     my $n            = $total_counts->{'allele_counts'}{'called'};
-    my $x            = $total_alleles->{$minor_allele} / $n;
-    my $n_j          = $total_counts->{'allele_counts'}{'called'};
-    $n_j             = $total_counts->{'allele_counts'}{'called'} + $total_counts->{'allele_counts'}{'nocall'} 
-    if defined $total_counts->{'allele_counts'}{'nocall'};
+    my $x            = $total_alleles->{$ma} / $n;
     
-    my  $x_ja = defined $a_a_counts->{$A} || defined $a_a_counts->{$B} ? 
-        $a_a_counts->{$minor_allele} / ($a_a_counts->{$B} + $a_a_counts->{$A}) : 0;
-    my  $x_jb = defined $b_a_counts->{$A} || defined $b_a_counts->{$B} ? 
-	$b_a_counts->{$minor_allele} / ($b_a_counts->{$A} + $b_a_counts->{$B}) : 0; 
-    q
-    my $n_ja = $a_t_counts->{'allele_counts'}{'called'}; 
-    my $n_jb = $b_t_counts->{'allele_counts'}{'called'};
-
-    my $dem = 2 * $n / ($n - 1) * $x * (1 - $x);
+    my $ma_a = _sort_by_increasing_vals($a_a_counts);
+    my $ma_b = _sort_by_increasing_vals($b_a_counts);
     
-    my $main_num_a = 2 * $n_ja/($n_ja -1) * $x_ja * (1 - $x_ja);
-    my $main_num_b = 2 * $n_jb/($n_jb -1) * $x_jb * (1 - $x_jb);
+    my $n_a = $a_t_counts->{'allele_counts'}{'called'};
+    my $n_b = $b_t_counts->{'allele_counts'}{'called'};
+
+    my $x_a = $a_a_counts->{$ma_a} / $n_a;
+    my $x_b = $b_a_counts->{$ma_b} / $n_b;
+   
+    my $dem = 2 * ($n / ($n - 1)) * $x * (1 - $x);
     
-    my $n_ja_2 = $n_ja * ($n_ja -1 )/2;
-    my $n_jb_2 = $n_jb * ($n_jb -1 )/2;
-    my $n_jt_2 = $n_ja_2 + $n_jb_2;
+    my $main_num_a = 2 * $n_a/($n_a -1) * $x_a * (1 - $x_a);
+    my $main_num_b = 2 * $n_b/($n_b -1) * $x_b * (1 - $x_b);
+    
+    my $n_a_c2 = $n_a * ($n_a - 1)/2;
+    my $n_b_c2 = $n_b * ($n_b - 1)/2;
+    my $n_t_c2 = $n_a_c2 + $n_b_c2;
 
-    my $a_final = $n_ja_2 * $main_num_a;
-    my $b_final = $n_jb_2 * $main_num_b;
+    my $a_final = $n_a_c2 * $main_num_a;
+    my $b_final = $n_b_c2 * $main_num_b;
 
-    my $FST =  1 - ((($a_final + $b_final) / $n_jt_2 ) / $dem);
+    my $FST =  1 - ((($a_final + $b_final) / $n_t_c2 ) / $dem); 
+    $FST = (abs($FST) < 0.000000001) ? 0 : $FST;
     print "$self->{'line'}{'refined'}{'seqid'}\t$self->{'line'}{'refined'}{'start'}\t$FST\n";
 }
 
@@ -584,6 +579,19 @@ sub _Print_Pragma{
 
 
 #-----------------------------------------------------------------------------   
+sub _sort_by_increasing_vals{
+    
+    my $hashref = shift;
+    my %hash = %{$hashref};
+    my @s_keys = sort {$hash{$a} <=> $hash{$b}} keys %hash; 
+    
+    my $lval;
+    RID: while($lval = shift @s_keys){
+	last RID if $lval ne '^' 
+    }
+    return $lval;
+
+}
 
 
 
