@@ -495,20 +495,8 @@ sub FST{
     my $n            = $total_counts->{'allele_counts'}{'called'};
     my $x            = $total_alleles->{$ma} / $n;
     
-<<<<<<< HEAD
-    my  $x_ja = defined $a_a_counts->{$A} || defined $a_a_counts->{$B} ? 
-        $a_a_counts->{$minor_allele} / ($a_a_counts->{$B} + $a_a_counts->{$A}) : 0;
-    my  $x_jb = defined $b_a_counts->{$A} || defined $b_a_counts->{$B} ? 
-	$b_a_counts->{$minor_allele} / ($b_a_counts->{$A} + $b_a_counts->{$B}) : 0; 
-    
-    my $n_ja = $a_t_counts->{'allele_counts'}{'called'}; 
-    my $n_jb = $b_t_counts->{'allele_counts'}{'called'};
-
-    my $dem = 2 * $n / ($n - 1) * $x * (1 - $x);
-=======
     my $ma_a = _sort_by_increasing_vals($a_a_counts);
     my $ma_b = _sort_by_increasing_vals($b_a_counts);
->>>>>>> 61ccbe5e007ec45a19688f536cde0c428014f495
     
     my $n_a = $a_t_counts->{'allele_counts'}{'called'};
     my $n_b = $b_t_counts->{'allele_counts'}{'called'};
