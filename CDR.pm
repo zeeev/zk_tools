@@ -2,8 +2,9 @@ package CDR;
 use Tabix;
 use strict;
 use warnings;
+use Math::CDF;
 use Set::IntSpan::Fast;
-
+use List::MoreUtils qw(uniq);
 
 #-----------------------------------------------------------------------------
 #--------------------------------- Constructor -------------------------------
@@ -260,13 +261,18 @@ sub Query_Range {
     my ($self, $args) = @_;
     my $t = Tabix->new(-data => $self->{'file'});
     my $i = $t->query($args);
-    while(my $l = $t->read($i)){
+    LINE: while(my $l = $t->read($i)){
+	next LINE if ! defined $l;
 	$self->{'line'}{'raw'} = $l;
 	$self->_Parse_Line;
-	next if !defined $self->{'line'}{'genotypes'};
-	$self->_Scrub_No_Call;
+	next LINE if !defined $self->{'line'}{'genotypes'};
+	my $flag = $self->_Scrub_No_Call;
+	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
+	next LINE if $flag == 0;
+	my @group = (1,2,4,5,6,7);
+	$self->FST(\@group);
+	#$self->HWE_Departure;	
     }
-    $self->_Print_Pragma;
 }
 
 
@@ -359,10 +365,12 @@ sub _Parse_Alleles{
 
     while(my ($indv, $g) = each %{$genotypes}){
 	while(my ($info, $d) = each %{$g}){
-	    push @genotypes, $d if $info eq 'genotype';
+	    push @genotypes, split /:/, $d if $info eq 'genotype';
 	}
     }
-    return \@genotypes;
+
+    my @uniq = sort {$a cmp $b} uniq @genotypes;
+    return \@uniq;
 }
 
 #-----------------------------------------------------------------------------   
@@ -373,7 +381,7 @@ sub _Count_Genotypes{
 
     my %allele_counts;
     my %genotype_counts;
-
+ 
     while( my($info, $value) = each %{$info_hash}){
 	while(my($key, $value_2) = each %{$value}){
 	    if ($key =~ /genotype/){
@@ -396,97 +404,126 @@ sub _Count_Genotypes{
 	$total{'allele_counts'}{'called'} += $value if $key !~ /\^/;
     }
 
-    return (\%total, \%allele_counts);
+    return (\%total, \%allele_counts, \%genotype_counts);
 }
 
-#-----------------------------------------------------------------------------   
-
-sub Expected_Hetrozygosity{
-
-    my $self = shift;
-    
-    my @alleles = @{$self->{'alleles'}};
-
-    return if !defined $self->{'total_counts'}{'allele_counts'}{'called'};
-    return if scalar (grep {!/\^/} @alleles) > 2;
-    if(scalar (grep {!/\^/} @alleles) < 2){
-	
-	my $expected_hets = 0;
-	my $observed_hets = 0;
-
-	if(defined $self->{'genotype_counts'}{"$alleles[0]:$alleles[1]"}){
-	    $observed_hets = $self->{'genotype_counts'}{"$alleles[0]:$alleles[1]"};
-	}
-	print "$expected_hets\t$observed_hets\n";
-	$self->{'expected_hets'}  = $expected_hets;
-        $self->{'observed_hets'}  = $observed_hets;
-    }
-    else{
-	my $total_alleles = $self->{'total_counts'}{'allele_counts'}{'called'};
-	my $p = $self->{'allele_counts'}{$alleles[0]} / $total_alleles;
-	my $q = $self->{'allele_counts'}{$alleles[1]} / $total_alleles;
-	my $expected_hets = 2 * $p * $q * $total_alleles / 2;
-	$expected_hets = int $expected_hets;
-	my $observed_hets = 0;
-	if (defined $self->{'genotype_counts'}{"$alleles[0]:$alleles[1]"}){
-	    $observed_hets = $self->{'genotype_counts'}{"$alleles[0]:$alleles[1]"};
-	}
-	$self->{'expected_hets'}  = $expected_hets;
-	$self->{'observed_hets'}  = $observed_hets;
-	print "$expected_hets\t$observed_hets\n";
-    }
-}
 #-----------------------------------------------------------------------------   
 
 sub HWE_Departure{
 
     my $self = shift;
-    my @alleles = @{$self->{'alleles'}};
 
-    return if !defined $self->{'total_counts'}{'allele_counts'}{'called'};
-    return if scalar (grep {!/\^/} @alleles) > 2;
-
-    my $total_alleles = $self->{'total_counts'}{'allele_counts'}{'called'};
-    my $total_indvs   = $self->{'total_counts'}{'genotype_counts'}{'called'};
- 
-    my $p = 0;
-    my $q = 0;
-
-    $p = $self->{allele_counts}{$alleles[0]} / $total_alleles if defined $self->{allele_counts}{$alleles[0]};
-    $q = $self->{allele_counts}{$alleles[1]} / $total_alleles if defined $self->{allele_counts}{$alleles[1]};
-
-    my $exp_pp = $p**2 * $total_indvs ;
-    my $exp_qq = $q**2 * $total_indvs ;
-    my $exp_pq = 2 * $q * $p;  
+    my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+    my @counts  = _Count_Genotypes($self->{'line'}{'genotypes'});
     
-    my  $obs_pp = $self->{'genotype_counts'}{"$alleles[0]:$alleles[0]"} ;
-    my  $obs_qq = $self->{'genotype_counts'}{"$alleles[1]:$alleles[1]"} ; 
-    my  $obs_pq = $self->{'genotype_counts'}{"$alleles[0]:$alleles[1]"} ;
 
-    $obs_pp = 0 if ! defined $obs_pp;
-    $obs_qq = 0 if ! defined $obs_qq;
-    $obs_pq = 0 if ! defined $obs_pq;
+    return if scalar (grep {!/\^/} @alleles) > 2;
+    return if scalar (grep {!/\^/} @alleles) == 1;
 
-    my $chi = ($obs_pp - $exp_pp)**2 + ($obs_pq - $exp_pq)**2  + ($obs_qq - $exp_qq)**2;
-    if ($chi > 3.84){
-	print "1\n";
-    }
-    else{
-	print "0\n";
-    }
+  #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[1]"};     
+  #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[0]"};
+  #  return if ! defined $counts[2]->{"$alleles[1]:$alleles[1]"};
+  #  
+  #  my $total_alleles   = $counts[0]->{'allele_counts'}{'called'};
+  #  my $total_genotypes = $counts[0]->{'genotype_counts'}{'called'};
+  #  my $p               = 0;
+  #  my $q               = 0;
+  #  
+  #  $p = $counts[1]->{$alleles[0]} / $total_alleles if defined $counts[1]->{$alleles[0]};
+  #  $q = $counts[1]->{$alleles[1]} / $total_alleles if defined $counts[1]->{$alleles[1]};
+  #  
+  #  my $exp_pp = int $p**2  * $total_genotypes;
+  #  my $exp_qq = int $q**2  * $total_genotypes;
+  #  my $exp_pq = int 2 * $p * $q * $total_genotypes; 
+
+    my $AA = 0;
+    my $AB = 0; 
+    my $BB = 0;
+
+
+    $AB = $counts[2]->{"$alleles[0]:$alleles[1]"} if defined $counts[2]->{"$alleles[0]:$alleles[1]"};
+    $AA = $counts[2]->{"$alleles[0]:$alleles[0]"} if defined $counts[2]->{"$alleles[0]:$alleles[0]"};
+    $BB = $counts[2]->{"$alleles[1]:$alleles[1]"} if defined $counts[2]->{"$alleles[1]:$alleles[1]"};
+
+     
+
+    print "$self->{line}{refined}{start}\t$AA\t$AB\t$BB\n";
+
+
+#    my $p_pp =  _Chi_Lookup($exp_pp, $AA);
+#    my $p_pq =  _Chi_Lookup($exp_pq, $AB);
+#    my $p_qq =  _Chi_Lookup($exp_qq, $BB);
+#
+#    my $chi = $p_pp + $p_pq + $p_qq;
+#    my $p_value   = Math::CDF::pchisq($chi, 1);
+#    print "$p_value\n";
 } 
 
+#-----------------------------------------------------------------------------   
+
+sub _Chi_Lookup{
+
+    my ($exp, $obs) = @_;
+    my $chi;
+   
+    if ($exp != 0 ){
+	$chi = ($exp - $obs)**2 / $exp;
+    }
+    else{
+	$chi = 0;
+    }
+    return $chi;
+}
+    
 #-----------------------------------------------------------------------------   
 
 sub FST{
 
     my ($self, $groups) = @_;
-    $self->_Group($groups);
-    my ($a_t_counts, $a_a_counts) = _Count_Genotypes($self->{'line'}{'group_A'});
-    my ($b_t_counts,   $b_b_counts) = _Count_Genotypes($self->{'line'}{'group_B'});
+   
 
-    my $n_ij_a = $a_t_counts->{'allele_counts'}{'called'}; 
-    my $n_ij_b = $b_t_counts->{'allele_counts'}{'called'};
+    my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+    return if scalar (grep {!/\^/} @alleles) == 1;
+
+
+    $self->_Group($groups);
+    my ($a_t_counts, $a_a_counts)      = _Count_Genotypes($self->{'line'}{'group_A'});
+    my ($b_t_counts, $b_a_counts)      = _Count_Genotypes($self->{'line'}{'group_B'});
+    my ($total_counts, $total_alleles) = _Count_Genotypes($self->{'line'}{'genotypes'});
+
+    my ($A,$B) = keys %{$total_alleles};
+    my $a_c    = $total_alleles->{$A};
+    my $b_c    = $total_alleles->{$B};
+    
+    my $minor_allele = $a_c < $b_c ? $A : $B;
+    my $n            = $total_counts->{'allele_counts'}{'called'};
+    my $x            = $total_alleles->{$minor_allele} / $n;
+    my $n_j          = $total_counts->{'allele_counts'}{'called'};
+    $n_j             = $total_counts->{'allele_counts'}{'called'} + $total_counts->{'allele_counts'}{'nocall'} 
+    if defined $total_counts->{'allele_counts'}{'nocall'};
+    
+    my  $x_ja = defined $a_a_counts->{$minor_allele} && defined $a_t_counts->{'allele_counts'} ? 
+        $a_a_counts->{$minor_allele} / $a_t_counts->{'allele_counts'} : 0;
+    my  $x_jb = defined $b_a_counts->{$minor_allele} && defined $b_t_counts->{'allele_counts'} ? 
+	$b_a_counts->{$minor_allele} / $b_t_counts->{'allele_counts'} : 0; 
+    
+    my $n_ja = $a_t_counts->{'allele_counts'}{'called'}; 
+    my $n_jb = $b_t_counts->{'allele_counts'}{'called'};
+
+    my $dem = 2 * $n /($n - 1) * $x * (1 - $x);
+    
+    my $main_num_a = 2 * $n_ja/($n_ja -1) * $x_ja * (1 - $x_ja);
+    my $main_num_b = 2 * $n_jb/($n_jb -1) * $x_jb * (1 - $x_jb);
+    
+    my $n_ja_2 = $n_ja * ($n_ja -1 )/2;
+    my $n_jb_2 = $n_jb * ($n_jb -1 )/2;
+    my $n_jt_2 = $n_ja_2 + $n_jb_2;
+
+    my $a_final = $n_ja_2 * $main_num_a;
+    my $b_final = $n_jb_2 * $main_num_b;
+
+    my $FST =  1 - (($a_final + $b_final) / $n_jt_2 ) / $dem;
+    print "$self->{'line'}{'refined'}{'seqid'}\t$self->{'line'}{'refined'}{'start'}\t$FST\n";
 }
 
 #-----------------------------------------------------------------------------   
@@ -523,8 +560,8 @@ sub _Scrub_No_Call{
 
     my $self    = shift;
     my $alleles = _Parse_Alleles($self->{'line'}{'genotypes'});
-    return if scalar @{$alleles} == 1 && grep {/\^/} @{$alleles};
-    $self->_Print_Line;
+    return 0 if scalar @{$alleles} == 1 && grep {/\^/} @{$alleles};
+    return 1;
 }
 	
 #-----------------------------------------------------------------------------   
@@ -537,7 +574,7 @@ sub _Print_Line{
 
 #-----------------------------------------------------------------------------   
 
-sub _Print_Pragma {
+sub _Print_Pragma{
     my $self = shift;   
     my @pragma = @{$self->{'pragma'}};
     foreach my $p (@pragma){
@@ -546,8 +583,7 @@ sub _Print_Pragma {
 }
 
 
-
-
+#-----------------------------------------------------------------------------   
 
 
 
