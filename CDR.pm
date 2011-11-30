@@ -484,7 +484,7 @@ sub FST{
 
     my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
     return if scalar (grep {!/\^/} @alleles) == 1;
-
+    return if scalar (grep {!/\^/} @alleles) > 2;
 
     $self->_Group($groups);
     my ($a_t_counts, $a_a_counts)      = _Count_Genotypes($self->{'line'}{'group_A'});
@@ -502,15 +502,15 @@ sub FST{
     $n_j             = $total_counts->{'allele_counts'}{'called'} + $total_counts->{'allele_counts'}{'nocall'} 
     if defined $total_counts->{'allele_counts'}{'nocall'};
     
-    my  $x_ja = defined $a_a_counts->{$minor_allele} && defined $a_t_counts->{'allele_counts'} ? 
-        $a_a_counts->{$minor_allele} / $a_t_counts->{'allele_counts'} : 0;
-    my  $x_jb = defined $b_a_counts->{$minor_allele} && defined $b_t_counts->{'allele_counts'} ? 
-	$b_a_counts->{$minor_allele} / $b_t_counts->{'allele_counts'} : 0; 
-    
+    my  $x_ja = defined $a_a_counts->{$A} || defined $a_a_counts->{$B} ? 
+        $a_a_counts->{$minor_allele} / ($a_a_counts->{$B} + $a_a_counts->{$A}) : 0;
+    my  $x_jb = defined $b_a_counts->{$A} || defined $b_a_counts->{$B} ? 
+	$b_a_counts->{$minor_allele} / ($b_a_counts->{$A} + $b_a_counts->{$B}) : 0; 
+    q
     my $n_ja = $a_t_counts->{'allele_counts'}{'called'}; 
     my $n_jb = $b_t_counts->{'allele_counts'}{'called'};
 
-    my $dem = 2 * $n /($n - 1) * $x * (1 - $x);
+    my $dem = 2 * $n / ($n - 1) * $x * (1 - $x);
     
     my $main_num_a = 2 * $n_ja/($n_ja -1) * $x_ja * (1 - $x_ja);
     my $main_num_b = 2 * $n_jb/($n_jb -1) * $x_jb * (1 - $x_jb);
