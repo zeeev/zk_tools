@@ -202,7 +202,7 @@ sub Print_Gvf{
 	       if ($score !~ /\./ && $score < $quality){
 		   $source = "no_call";
 		   $attributes =~ s/Variant_seq=.*?;/Variant_seq=^;/;
-		   $attributes =~ s/Genotype=.*?;/Genotype=0:0;/;
+		   $attributes =~ s/Genotype=.*?;/Genotype=homozygous;/;
 	       }
 	       
 	       print "$seqid\t$source\t$type\t$start\t$end\t$score\t$strand\t$phase\t$attributes\n";

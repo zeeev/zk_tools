@@ -35,10 +35,10 @@ die $usage unless $file;
 my $cdr = CDR->new('file' => $file);
 my $whatever = $cdr->Get_Seqids();
 my $pragma = $cdr->Get_Pragma();
-my @seqids = @{$cdr->Get_Seqids()};
-foreach my $s (@seqids){
-    $cdr->Query_Range($s);    
-}
+
+my $s = "scaffold612"; 
+$cdr->Query_Range($s);    
+
 
 
 
