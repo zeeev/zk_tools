@@ -60,7 +60,7 @@ die $usage if $help || ! $opt_success;
 die $usage unless defined $gvf && defined $depth && defined $quality; 
 
 
-my %NO_CALL_POS;
+
 my %GVF;
 my %CUTOFF_LOOKUP;
 
