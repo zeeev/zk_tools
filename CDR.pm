@@ -269,8 +269,8 @@ sub Query_Range {
 	my $flag = $self->_Scrub_No_Call;
 	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
 	next LINE if $flag == 0;
-#	my @group = (40, 0, 3, 31, 35, 19, 24);
-	my @group = (1,2,3,4);
+	my @group = (40, 0, 3, 31, 35, 19, 24);
+#	my @group = (1,2,3,4);
 	$self->FST(\@group);
 	#$self->HWE_Departure;	
     }
