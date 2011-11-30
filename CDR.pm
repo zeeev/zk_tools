@@ -496,8 +496,8 @@ sub FST{
     my $n            = $total_counts->{'allele_counts'}{'called'};
     my $x            = $total_alleles->{$ma} / $n;
     
-    my $ma_a = _sort_by_increasing_vals($a_a_counts);
-    my $ma_b = _sort_by_increasing_vals($b_a_counts);
+#    my $ma_a = _sort_by_increasing_vals($a_a_counts);
+#    my $ma_b = _sort_by_increasing_vals($b_a_counts);
     
     return if ! defined $a_t_counts->{'allele_counts'}{'called'};
     return if ! defined $b_t_counts->{'allele_counts'}{'called'};
@@ -505,8 +505,8 @@ sub FST{
     my $n_a = $a_t_counts->{'allele_counts'}{'called'};
     my $n_b = $b_t_counts->{'allele_counts'}{'called'};
 
-    my $x_a = $a_a_counts->{$ma_a} / $n_a;
-    my $x_b = $b_a_counts->{$ma_b} / $n_b;
+    my $x_a = $a_a_counts->{$ma} / $n_a;
+    my $x_b = $b_a_counts->{$ma} / $n_b;
    
     my $dem = 2 * ($n / ($n - 1)) * $x * (1 - $x);
     
