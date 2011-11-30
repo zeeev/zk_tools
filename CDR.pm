@@ -269,7 +269,7 @@ sub Query_Range {
 	my $flag = $self->_Scrub_No_Call;
 	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
 	next LINE if $flag == 0;
-	my @group = (1,2,4,5,6,7);
+	my @group = (40, 0, 3, 31, 35, 19, 24);
 	$self->FST(\@group);
 	#$self->HWE_Departure;	
     }
@@ -522,7 +522,7 @@ sub FST{
     my $a_final = $n_ja_2 * $main_num_a;
     my $b_final = $n_jb_2 * $main_num_b;
 
-    my $FST =  1 - (($a_final + $b_final) / $n_jt_2 ) / $dem;
+    my $FST =  1 - ((($a_final + $b_final) / $n_jt_2 ) / $dem);
     print "$self->{'line'}{'refined'}{'seqid'}\t$self->{'line'}{'refined'}{'start'}\t$FST\n";
 }
 
