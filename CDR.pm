@@ -506,7 +506,7 @@ sub FST{
         $a_a_counts->{$minor_allele} / ($a_a_counts->{$B} + $a_a_counts->{$A}) : 0;
     my  $x_jb = defined $b_a_counts->{$A} || defined $b_a_counts->{$B} ? 
 	$b_a_counts->{$minor_allele} / ($b_a_counts->{$A} + $b_a_counts->{$B}) : 0; 
-    q
+    
     my $n_ja = $a_t_counts->{'allele_counts'}{'called'}; 
     my $n_jb = $b_t_counts->{'allele_counts'}{'called'};
 
