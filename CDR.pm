@@ -269,7 +269,8 @@ sub Query_Range {
 	my $flag = $self->_Scrub_No_Call;
 	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
 	next LINE if $flag == 0;
-	my @group = (40, 0, 3, 31, 35, 19, 24);
+#	my @group = (40, 0, 3, 31, 35, 19, 24);
+	my @group = (1,2,3,4);
 	$self->FST(\@group);
 	#$self->HWE_Departure;	
     }
@@ -498,6 +499,9 @@ sub FST{
     my $ma_a = _sort_by_increasing_vals($a_a_counts);
     my $ma_b = _sort_by_increasing_vals($b_a_counts);
     
+    return if ! defined $a_t_counts->{'allele_counts'}{'called'};
+    return if ! defined $b_t_counts->{'allele_counts'}{'called'};
+
     my $n_a = $a_t_counts->{'allele_counts'}{'called'};
     my $n_b = $b_t_counts->{'allele_counts'}{'called'};
 
