@@ -505,13 +505,13 @@ sub FST{
     my $n_a = $a_t_counts->{'allele_counts'}{'called'};
     my $n_b = $b_t_counts->{'allele_counts'}{'called'};
 
-    my $x_a = $a_a_counts->{$ma} / $n_a;
-    my $x_b = $b_a_counts->{$ma} / $n_b;
+    my $x_a = defined $a_a_counts->{$ma} ? ($a_a_counts->{$ma} / $n_a ) : 0;
+    my $x_b = defined $b_a_counts->{$ma} ? ($b_a_counts->{$ma} / $n_b ) : 0;
    
     my $dem = 2 * ($n / ($n - 1)) * $x * (1 - $x);
     
-    my $main_num_a = 2 * $n_a/($n_a -1) * $x_a * (1 - $x_a);
-    my $main_num_b = 2 * $n_b/($n_b -1) * $x_b * (1 - $x_b);
+    my $main_num_a = $x_a != 0 ? 2 * $n_a/($n_a -1) * $x_a * (1 - $x_a) : 0 ;
+    my $main_num_b = $x_b != 0 ? 2 * $n_b/($n_b -1) * $x_b * (1 - $x_b) : 0 ;
     
     my $n_a_c2 = $n_a * ($n_a - 1)/2;
     my $n_b_c2 = $n_b * ($n_b - 1)/2;
