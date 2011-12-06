@@ -17,7 +17,6 @@ use List::MoreUtils qw(uniq);
      Function: Creates a CDR object;
      Returns : A CDR object
      Args    :
-
 =cut
 
 sub new {
@@ -266,14 +265,16 @@ sub Query_Range {
 	$self->{'line'}{'raw'} = $l;
 	$self->_Parse_Line;
 	next LINE if !defined $self->{'line'}{'genotypes'};
-	my $flag = $self->_Scrub_No_Call;
-	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
-	next LINE if $flag == 0;
-	my @group = (40, 0, 3, 31, 35, 19, 24);
+#	my $flag = $self->_Scrub_No_Call;
+#	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
+#	next LINE if $flag == 0;
+#	my @group = (40, 0, 3, 31, 35, 19, 24);
 #	my @group = (1,2,3,4);
-	$self->FST(\@group);
-	#$self->HWE_Departure;	
-    }
+#	$self->FST(\@group);
+#       $self->HWE_Departure;	
+	$self->_Print_Beagle();
+#	$self->_Print_MAP();
+   }
 }
 
 
@@ -447,7 +448,6 @@ sub HWE_Departure{
     $BB = $counts[2]->{"$alleles[1]:$alleles[1]"} if defined $counts[2]->{"$alleles[1]:$alleles[1]"};
 
      
-
     print "$self->{line}{refined}{start}\t$AA\t$AB\t$BB\n";
 
 
@@ -494,7 +494,7 @@ sub FST{
     my $ma = _sort_by_increasing_vals($total_alleles);
     
     my $n            = $total_counts->{'allele_counts'}{'called'};
-    my $x            = $total_alleles->{$ma} / $n;
+    #my $x            = $total_alleles->{$ma} / $n;
     
 #    my $ma_a = _sort_by_increasing_vals($a_a_counts);
 #    my $ma_b = _sort_by_increasing_vals($b_a_counts);
@@ -508,6 +508,8 @@ sub FST{
     my $x_a = defined $a_a_counts->{$ma} ? ($a_a_counts->{$ma} / $n_a ) : 0;
     my $x_b = defined $b_a_counts->{$ma} ? ($b_a_counts->{$ma} / $n_b ) : 0;
    
+    my $x = ($x_a + $x_b) / 2;
+
     my $dem = 2 * ($n / ($n - 1)) * $x * (1 - $x);
     
     my $main_num_a = $x_a != 0 ? 2 * $n_a/($n_a -1) * $x_a * (1 - $x_a) : 0 ;
@@ -597,7 +599,89 @@ sub _sort_by_increasing_vals{
 
 }
 
+#-----------------------------------------------------------------------------   
+sub _Print_MAP{
 
+    my $self = shift;
+
+
+    return if $self->{line}{refined}{type} ne 'SNV';
+
+    print "$self->{line}{refined}{seqid}\t";
+    print "$self->{line}{refined}{seqid}:";
+    print "$self->{line}{refined}{start}:";
+    print "@{$self->{line}{refined}{ref}}[0]\t";
+    print "0\t";
+    print "$self->{line}{refined}{start}\n";
+
+}
+
+#-----------------------------------------------------------------------------   
+
+sub _Print_Beagle{
+
+    my $self = shift;
+
+
+    return if $self->{line}{refined}{type} ne 'SNV';
+    my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+    my $as       = join /","/, @alleles;
+
+    print "M\t";
+    print "$self->{line}{refined}{seqid}:";
+    print "$self->{line}{refined}{start}:";
+    print "@{$self->{line}{refined}{ref}}[0]:";
+    print "$as\t";
+
+    my ($flag) = sort {$b <=> $a} keys %{$self->{line}{genotypes}};
+    
+    foreach my $key (sort {$a <=> $b} keys %{$self->{line}{genotypes}}){
+	my @gens = split /:/, $self->{line}{genotypes}{$key}{genotype};
+	print "$gens[0]\t";
+	print "$gens[1]";
+	$key == $flag ? print "\n" : print "\t";
+    }
+	
+
+}
+
+#-----------------------------------------------------------------------------   
+sub Print_Beagle_Header{
+
+    my $self = shift;
+    print "I\t";
+    print "id\t";
+    
+    my ($flag) = sort {$b <=> $a} keys %{$self->{file_keys}};
+    foreach my $key (sort {$a <=> $b} keys %{$self->{file_keys}}){
+	print "$key\t";
+	print "$key";
+	$key == $flag ? print "\n" : print "\t";
+    }
+}
+
+#-----------------------------------------------------------------------------   
+sub LD{
+    
+    my @snp;
+    my $count = 0; 
+
+    my ($self, $args) = @_;
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $i = $t->query($args);
+  LINE: while(my $l = $t->read($i)){
+      my @l = split /\t/, $l;
+      $self->_Parse_Line();
+
+      my @genotypes;
+      
+      foreach my $key (%{$self->{line}{genotypes}}){
+	  my @genotype = split /:/, $self->{line}{genotypes}{$key};
+	  $genotype[0] ne $genotype[1] ?  push @genotypes , 1 : 
+	      push @genotypes, 0;
+      }
+  }
+}
 
 1;
 
