@@ -5,114 +5,148 @@ use Tabix;
 use strict;
 use warnings;
 use Math::CDF;
-use Data::Dumper;
+use Set::IntervalTree;
 use Set::IntSpan::Fast;
 use Getopt::Long;
 no autovivification;
 
 my $usage = "
 
-NO-CALL-FILTER -c coverage.gz -g gvf -b built.txt
-
+NO-CALL-FILTER --bed my.bedfile --build my.build.txt -c coverage.gz -g gvf  -l low.coverage.cut -q low.quality.cut --threads 5
 
 ";
 
 my ($help);
+my $depth;
 my $bgi_depth;
 my $gvf;
 my $build;
 my $quality = 20;
-my $depth = 5;
+my $ldepth = 5;
+my $hdepth;
 my $coverage;
+my $bed;
 my $n_threads = 4;
-my $opt_success = GetOptions('help'       => \$help,
-                             "depth=s"    => \$depth,
-			     "coverage=s" => \$coverage,
-			     "gvf=s"      => \$gvf, 
-			     "quality=s"  => \$quality,
-                             "build=s"    => \$build,
-			     "threads=s"  => \$n_threads,
+my $opt_success = GetOptions('help'         => \$help,
+                             "low_depth=s"  => \$ldepth,
+			     "high_depth=s" => \$hdepth,
+			     "coverage=s"   => \$coverage,
+			     "gvf=s"        => \$gvf, 
+			     "quality=s"    => \$quality,
+                             "build=s"      => \$build,
+			     "bed=s"        => \$bed,
+			     "threads=s"    => \$n_threads,
     );
 
 die $usage if $help || ! $opt_success;
-die $usage unless defined $gvf && defined $depth && defined $quality && defined $build && defined $coverage; 
+die $usage unless defined $gvf && defined $ldepth && defined $quality && defined $build && defined $coverage && $bed; 
 
 my %BUILD;
+my %BED;
 
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
 #-----------------------------------------------------------------------------
 
 Parse_Build($build);
-my $gvf_t        = Tabix->new(-data=>$gvf);
-my @gvf_features:shared = $gvf_t->getnames();
-
-my $l = scalar @gvf_features;
-
-print "$l\n";
-print Dumper @gvf_features;
-
-my %temp;
-for(my $i = 0; $i < $l; $i++){
-    print "$i\n";
-    print "$gvf_features[$i]\n";
-    $temp{$gvf_features[$i]}++;
-}
-
-my $children = Run_Threads(\%temp);
-my @child = @{$children};
-foreach my $c (@child){
-    my $tmp = waitpid($c, 0);
-}
+Parse_BED($bed);
+my $gvf_t    = Tabix->new(-data=>$gvf);
+my %features = map {$_ => 1}  $gvf_t->getnames();
+Run_Threads(\%features);
 
 #-----------------------------------------------------------------------------
 #-------------------------------- SUBROUTINES --------------------------------
 #-----------------------------------------------------------------------------
 sub Handel_Run{
-    my $feature = shift;
-    my $gvf_t       = Tabix->new(-data=>$gvf);
-    my $cov_t       = Tabix->new(-data=>$coverage);
-    my $gvf_iter    = $gvf_t->query($feature);
-    my $cov_iter    = $cov_t->query($feature);
-    my $depth_count = Count_Depth($cov_t, $cov_iter);
-    my $h_cut       = Estimate_High($depth_count, $feature);
-    $cov_iter       = $cov_t->query($feature);
-    my $ranges      = Range_Depth($cov_t, $cov_iter, $h_cut, $feature);
-    my $gvf_range   = Parse_GVF($gvf_t, $gvf_iter, $feature);
-    my $gvf_depth   = Del_Range($ranges, $gvf_range, $feature); 
-    Print_Gvf($gvf_depth);
+    my $feature             = shift;
+    my $gvf_t               = Tabix->new(-data=>$gvf);
+    my $cov_t               = Tabix->new(-data=>$coverage);
+    my $gvf_iter            = $gvf_t->query($feature);
+    my $cov_iter            = $cov_t->query($feature);
+    my $depth_count         = Count_Depth($cov_t, $cov_iter);
+    $hdepth                 = Estimate_High($depth_count, $feature) if ! defined $hdepth;
+    $cov_iter               = $cov_t->query($feature);
+    my $ranges              = Range_Depth($cov_t, $cov_iter, $feature);
+    my $gvf_ranged          = Process_GVF($gvf_t, $gvf_iter, $ranges, $feature);
+#    my $gvf_depth           = Del_Range($ranges, $gvf_range, $feature); 
+#    my ($gvf_depth, $tree)  = Del_Range($ranges, $gvf_range, $feature); 
+    Print_Gvf($feature, $gvf_ranged);
 }
 #-----------------------------------------------------------------------------
 sub Run_Threads{
     my $features = shift;
-    my @child;
-    foreach my $feature (keys %{$features}){
-	my $pid = fork();
-	if ($pid){
-	    push @child, $pid;
-	}
-	elsif ($pid == 0){
-	    Handel_Run($feature);
-	    exit 0;
+    my @features = keys %{$features};
+    
+    while(@features){
+	my @child;
+	my @temp_features;
+	if (scalar @features % $n_threads){
+	    for(my $i = 0; $i <= $n_threads; $i++){
+		my $feature = shift @features;
+		push @temp_features, $feature;
+	    }
 	}
 	else{
-	    die "couldn't fork: $!\n";
+	    for(my $i = 0; $i <= scalar @features; $i++){
+		my $feature = shift @features;
+		push @temp_features, $feature;
+	    }
+	}
+	my $child = Fork_Threads(\@temp_features);
+	foreach my $c (@{$child}){
+	    my $tmp = waitpid($c, 0);
 	}
     }
-    return \@child;
+}
+
+#-----------------------------------------------------------------------------
+sub Fork_Threads{    
+    my $f = shift;
+    my @childs;
+    foreach my $feature (@{$f}){ 
+	next if ! defined $feature;
+	my $pid = fork();
+        if ($pid) {
+	    # parent
+	    #print "pid is $pid, parent $$\n";
+	    push(@childs, $pid);
+        } elsif ($pid == 0) {
+	    # child
+	    Handel_Run($feature);
+	    exit 0;
+        } else {
+	    die "couldnt fork: $!\n";
+        }
+    }	
+    return \@childs;
+}
+
+#-----------------------------------------------------------------------------
+sub Parse_BED{
+    my $file = shift;
+    open(FH, '<', $file) || die "cannot open BED $file\n";
+    while (my $l = <FH>) {
+	chomp $l;
+	next if $l !~ /^chr*/;
+	my @l = split /\t/,  $l;
+	$BED{$l[0]} += ($l[2] - $l[1]) + 1;
+    }
+    close FH;
 }
 #-----------------------------------------------------------------------------
     sub Parse_Build{
     my $file = shift;
     print STDERR "Current Stage: Parsing $file file\n";
-    open(FH, '<', $file) || die "cannot open $file\n";
+    open(FH, '<', $file) || die "cannot open build $file\n";
     while(my $l = <FH>){
 	next if $l =~ /^\s+|#/;
 	my @l = split /\s+/, $l;
 	die "$file is not in correct format\n" if scalar @l != 3;
 	$BUILD{$l[0]} = $l[2];
     }
+    close FH;
 }
+
 #-----------------------------------------------------------------------------                        
 sub Count_Depth{ 
     my $t    = shift;
@@ -121,7 +155,7 @@ sub Count_Depth{
     print STDERR "Current Stage: Counting depth\n";
     while(my $l = $t->read($iter)){
 	my @l = split /\t/, $l;
-	$depth_count{$l[2]}++ if $l[2] > $depth; 
+	$depth_count{$l[2]}++; 
     }
     return \%depth_count;
 }  
@@ -129,22 +163,22 @@ sub Count_Depth{
 sub Estimate_High{
     my $depth_count = shift;
     my $feature     = shift;
-
     print STDERR "Current Stage: Estimating upper depth cutoff\n";
     my $total_depth;
     while(my ($depth, $count) = each %{$depth_count}){
 	$total_depth  += $depth * ($count + 1);
     }
-    my $lambda  = $total_depth > 0 ? $total_depth / $BUILD{$feature} : 0;
-    my $h_cut = $lambda > 0 ? Math::CDF::qpois(0.98, $lambda) : 0;
+    my $lambda  = $total_depth > 0 ? $total_depth / $BED{$feature} : 0;
+    my $h_cut   = $lambda == 0 || ! defined $lambda ? 0 : Math::CDF::qpois(0.98, $lambda);
+    print STDERR "low coverage dected! check $feature. high coverage cutoff \= $h_cut\n" if $h_cut < 1;
     return $h_cut;
+    
 }      
 #-----------------------------------------------------------------------------
 sub Range_Depth{
 
     my $t       = shift;
     my $iter    = shift;
-    my $cut_h   = shift;
     my $feature = shift;
 
     my $set = Set::IntSpan::Fast->new();   
@@ -159,25 +193,44 @@ sub Range_Depth{
 	    $set->add_range($start, $end);
 	}
 	$lpos = $l[1];
-	$set->add($l[1]) if $l[2] < $depth || $l[2] > $cut_h;
+	$set->add($l[1]) if $l[2] < $ldepth || $l[2] > $hdepth;
     }
     if($lpos < $BUILD{$feature}){
 	my $start = $lpos + 1;
 	my $end = $BUILD{$feature};
 	$set->add_range($start, $end); 
     }
-    return $set->as_string();
+    #return $set->as_string();
+    return $set;
 }	
 #-----------------------------------------------------------------------------
-sub Parse_GVF{
-    my $t    = shift;
-    my $iter = shift;
+sub Process_GVF{
+    my $t      = shift;
+    my $iter   = shift;
+    my $ranges = shift;
+    my $feature = shift;
+
+
+    my $tree = Set::IntervalTree->new;
+    
+
     my %gvf;
+
+
+    print STDERR "Current Stage: adding gaps\n";
+    my $it = $ranges->iterate_runs();
+    while (my ( $from, $to ) = $it->()) {
+        $gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
+	$tree->insert($feature, $from, $to);
+    }
+
+        
     while(my $l = $t->read($iter)){
 	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
 	    $attributes) = split /\t/, $l;
-	$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes";
+	$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes" if ! defined $ranges->contains_any($start .. $end);
     }
+    
     return(\%gvf); 
 }
 #-----------------------------------------------------------------------------
@@ -185,27 +238,48 @@ sub Del_Range{
     my $ranges  = shift;
     my $gvf     = shift;
     my $feature = shift;
-    print STDERR "Current Stage: filtering depth\n";
-    my @ranges = split /,/, $ranges;
-    for my $range (@ranges){
-	my @ab_range = $range =~ /-/ ? split /-/, $range : ($range, $range);
-	for(my $i = $ab_range[0]; $i <= $ab_range[1]; $i++){
-	    delete $gvf->{$i};
-	}
-	$gvf->{$ab_range[0]}{$ab_range[1]} = "gap\tno_call\t.\t.\t.\tID=$feature:$ab_range[0]:$ab_range[1];";    
+
+   # my $tree = Set::IntervalTree->new;
+
+   
+   # setinterval implementation
+    my $iter = $ranges->iterate_runs();
+    while (my ( $from, $to ) = $iter->()) {
+    	$gvf->{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";        
     }
+ 
+    # my @ranges = split /,/, $ranges;
+    # for my $range (@ranges){
+    # my @ab_range = $range =~ /-/ ? split /-/, $range : ($range, $range);
+#	$tree->insert("$feature:$ab_range[0]:$ab_range[1]", $ab_range[0], $ab_range[1]);
+#	$gvf->{$ab_range[0]}{$ab_range[1]} = "gap\tno_call\t.\t.\t.\tID=$feature:$ab_range[0]:$ab_range[1];";    
+#    }
+    #return ($gvf, $tree);
     return $gvf;
 }
 #-----------------------------------------------------------------------------
 sub Print_Gvf{
 
-    my $gvf = shift;
-    #print Dumper $gvf;
-    
-}
-#-----------------------------------------------------------------------------
-sub Validate_Files{
-
+    my $feature = shift;
+    my $gvf     = shift;
+   # my $tree    = shift;
+   # my $set     = shift;
+ 
+  OUTER: while(my($s, $e_hash) = each %{$gvf}){
+    INNER: while(my($e, $d) = each %{$gvf->{$s}}){
+	my ($type, $source, $score, $strand, $phase, $attributes) = split /\t/, $d;
+	if($type ne 'gap'){
+	    if($score < $quality){
+		$attributes =~ s/Zygosity=.*?;/Zygosity=homozygous;/;
+		$attributes =~ s/Variant_seq=.*?;/Variant_seq=^;/;
+	    }
+	    print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
+	}
+	else{
+	    print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
+	}
+    }
+  }
 }
 #-----------------------------------------------------------------------------
 
