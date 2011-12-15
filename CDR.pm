@@ -271,8 +271,8 @@ sub Query_Range {
 #	my @group = (40, 0, 3, 31, 35, 19, 24);
 #	my @group = (1,2,3,4);
 #	$self->FST(\@group);
-#       $self->HWE_Departure;	
-	$self->_Print_Beagle();
+       $self->HWE_Departure;	
+#	$self->_Print_Beagle();
 #	$self->_Print_MAP();
    }
 }
@@ -415,49 +415,49 @@ sub HWE_Departure{
 
     my $self = shift;
 
+    return if $self->{line}{refined}{type} ne 'SNV';
+    
     my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
     my @counts  = _Count_Genotypes($self->{'line'}{'genotypes'});
+    my $ref = @{$self->{line}{refined}{ref}}[0];
+    my ($alt) = grep {!/\^|$ref/} @alleles;
+    return if scalar (grep {!/\^|$ref/} @alleles) != 1;
+        
+
+    # return if $counts[0]->{allele_counts}{nocall} < 4; 
     
-
-    return if scalar (grep {!/\^/} @alleles) > 2;
-    return if scalar (grep {!/\^/} @alleles) == 1;
-
-  #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[1]"};     
-  #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[0]"};
-  #  return if ! defined $counts[2]->{"$alleles[1]:$alleles[1]"};
-  #  
-  #  my $total_alleles   = $counts[0]->{'allele_counts'}{'called'};
-  #  my $total_genotypes = $counts[0]->{'genotype_counts'}{'called'};
-  #  my $p               = 0;
-  #  my $q               = 0;
-  #  
-  #  $p = $counts[1]->{$alleles[0]} / $total_alleles if defined $counts[1]->{$alleles[0]};
-  #  $q = $counts[1]->{$alleles[1]} / $total_alleles if defined $counts[1]->{$alleles[1]};
-  #  
-  #  my $exp_pp = int $p**2  * $total_genotypes;
-  #  my $exp_qq = int $q**2  * $total_genotypes;
-  #  my $exp_pq = int 2 * $p * $q * $total_genotypes; 
+    #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[1]"};     
+    #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[0]"};
+    #  return if ! defined $counts[2]->{"$alleles[1]:$alleles[1]"};
+      
+    my $total_alleles   = $counts[0]->{'allele_counts'}{'called'};
+    my $total_genotypes = $counts[0]->{'genotype_counts'}{'called'};
+    my $p               = 0;
+    my $q               = 0;
+    
+    $p = $counts[1]->{$ref} / $total_alleles if defined $counts[1]->{$ref};
+    $q = $counts[1]->{$alt} / $total_alleles if defined $counts[1]->{$alt};
+    
+    my $exp_pp = int ($p**2  * $total_genotypes);
+    my $exp_qq = int ($q**2  * $total_genotypes);
+    my $exp_pq = int (2 * $p * $q * $total_genotypes); 
 
     my $AA = 0;
     my $AB = 0; 
     my $BB = 0;
 
-
     $AB = $counts[2]->{"$alleles[0]:$alleles[1]"} if defined $counts[2]->{"$alleles[0]:$alleles[1]"};
-    $AA = $counts[2]->{"$alleles[0]:$alleles[0]"} if defined $counts[2]->{"$alleles[0]:$alleles[0]"};
-    $BB = $counts[2]->{"$alleles[1]:$alleles[1]"} if defined $counts[2]->{"$alleles[1]:$alleles[1]"};
+    $AA = $counts[2]->{"$ref:$ref"} if defined $counts[2]->{"$ref:$ref"};
+    $BB = $counts[2]->{"$alt:$alt"} if defined $counts[2]->{"$alt:$alt"};
+    
+    my $p_pp =  _Chi_Lookup($exp_pp, $AA);
+    my $p_pq =  _Chi_Lookup($exp_pq, $AB);
+    my $p_qq =  _Chi_Lookup($exp_qq, $BB);
 
-     
-    print "$self->{line}{refined}{start}\t$AA\t$AB\t$BB\n";
-
-
-#    my $p_pp =  _Chi_Lookup($exp_pp, $AA);
-#    my $p_pq =  _Chi_Lookup($exp_pq, $AB);
-#    my $p_qq =  _Chi_Lookup($exp_qq, $BB);
-#
-#    my $chi = $p_pp + $p_pq + $p_qq;
-#    my $p_value   = Math::CDF::pchisq($chi, 1);
-#    print "$p_value\n";
+    my $chi = $p_pp + $p_pq + $p_qq;
+    my $p_value   =  1 - Math::CDF::pchisq($chi, 1);
+    
+    print "$self->{line}{refined}{start}\t$p_pp\t$AA\t$AB\t$BB\t$exp_pp\t$exp_pq\t$exp_qq\t$p\t$q\t$chi\t$p_value\n";
 } 
 
 #-----------------------------------------------------------------------------   
@@ -468,7 +468,7 @@ sub _Chi_Lookup{
     my $chi;
    
     if ($exp != 0 ){
-	$chi = ($exp - $obs)**2 / $exp;
+	$chi = (($obs - $exp)**2) / $exp;
     }
     else{
 	$chi = 0;
@@ -603,8 +603,6 @@ sub _sort_by_increasing_vals{
 sub _Print_MAP{
 
     my $self = shift;
-
-
     return if $self->{line}{refined}{type} ne 'SNV';
 
     print "$self->{line}{refined}{seqid}\t";
@@ -642,7 +640,6 @@ sub _Print_Beagle{
 	$key == $flag ? print "\n" : print "\t";
     }
 	
-
 }
 
 #-----------------------------------------------------------------------------   
@@ -682,7 +679,42 @@ sub LD{
       }
   }
 }
+#-----------------------------------------------------------------------------   
+sub fisher_yates_shuffle {
+    my $array = shift;
+    my $i;
+    for ($i = @$array; --$i; ) {
+        my $j = int rand ($i+1);
+        next if $i == $j;
+        @$array[$i,$j] = @$array[$j,$i];
+    }
+}
 
+#-----------------------------------------------------------------------------   
+# This function counts the number of non reference alleles in the array passed
+# into the function
+
+sub _deminish{
+
+    my ($self, $shuffled) = @_;
+    
+    my @non_ref_SNV;
+    my @non_ref_INS;
+    my @non_ref_DEL;
+    
+    foreach my $indv (@{$shuffled}){
+	my @g = split /:/, $self->{'line'}{'genotypes'}{$indv};
+	foreach my $genotype (@g){
+	    if ($genotype ne $self->{line}{refined}{ref}){
+		push @non_ref_SNV if $self->{line}{refined}{type} eq 'SNV';
+		push @non_ref_INS if $self->{line}{refined}{type} eq 'insertion';
+		push @non_ref_DEL if $self->{line}{refined}{type} eq 'deletion';
+	    }
+	}
+    }
+}
+
+#-----------------------------------------------------------------------------   
 1;
 
 

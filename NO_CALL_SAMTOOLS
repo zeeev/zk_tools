@@ -17,7 +17,6 @@ NO-CALL-FILTER --bed my.bedfile --build my.build.txt -c coverage.gz -g gvf  -l l
 ";
 
 my ($help);
-my $depth;
 my $bgi_depth;
 my $gvf;
 my $build;
@@ -63,7 +62,7 @@ sub Handel_Run{
     my $cov_t               = Tabix->new(-data=>$coverage);
     my $gvf_iter            = $gvf_t->query($feature);
     my $cov_iter            = $cov_t->query($feature);
-    my $depth_count         = Count_Depth($cov_t, $cov_iter);
+    my $depth_count  = Count_Depth($cov_t, $cov_iter);
     $hdepth                 = Estimate_High($depth_count, $feature) if ! defined $hdepth;
     $cov_iter               = $cov_t->query($feature);
     my $ranges              = Range_Depth($cov_t, $cov_iter, $feature);
@@ -122,11 +121,15 @@ sub Fork_Threads{
 }
 
 #-----------------------------------------------------------------------------
+
 sub Parse_BED{
     my $file = shift;
     open(FH, '<', $file) || die "cannot open BED $file\n";
     while (my $l = <FH>) {
 	chomp $l;
+	
+	# Model-centric match.  I should consider changing this. 
+	
 	next if $l !~ /^chr*/;
 	my @l = split /\t/,  $l;
 	$BED{$l[0]} += ($l[2] - $l[1]) + 1;
@@ -134,11 +137,18 @@ sub Parse_BED{
     close FH;
 }
 #-----------------------------------------------------------------------------
-    sub Parse_Build{
+    
+# In order to add a gap from the beginning of the genome to the first exome
+# regions you need to parse the build so that you know from 0 -> start and  
+# 999 -> end of each seqid.  data is $BUILD{seqid} = length;
+
+sub Parse_Build{
     my $file = shift;
-    print STDERR "Current Stage: Parsing $file file\n";
     open(FH, '<', $file) || die "cannot open build $file\n";
     while(my $l = <FH>){
+	
+	# skipping lines that begin with whitespace or comments
+
 	next if $l =~ /^\s+|#/;
 	my @l = split /\s+/, $l;
 	die "$file is not in correct format\n" if scalar @l != 3;
@@ -146,11 +156,14 @@ sub Parse_BED{
     }
     close FH;
 }
-
 #-----------------------------------------------------------------------------                        
+
+# I decided to bin the counts for each depth in a hash incase I wanted to
+# change the way I used the depth count information. $depth_count{depth=10}++
+# Returned is the depth count hash.
+
 sub Count_Depth{ 
-    my $t    = shift;
-    my $iter = shift;
+    my ($t,  $iter) = @_;
     my %depth_count;
     print STDERR "Current Stage: Counting depth\n";
     while(my $l = $t->read($iter)){
@@ -160,63 +173,91 @@ sub Count_Depth{
     return \%depth_count;
 }  
 #-----------------------------------------------------------------------------
+
+# Loop through %depth_count and sum the depths across all counts.
+# lambda (mean) is the $total_depth / feature length.  whole genome needs a
+# a bed file which will  be the same as build. I am looking at all position in
+# the bed this means the lambda will be lower than if i only look at positions
+# that have coverage. The high depth cutoff is returned.
+
 sub Estimate_High{
-    my $depth_count = shift;
-    my $feature     = shift;
+    my ($depth_count, $feature) = @_;
     print STDERR "Current Stage: Estimating upper depth cutoff\n";
     my $total_depth;
     while(my ($depth, $count) = each %{$depth_count}){
 	$total_depth  += $depth * ($count + 1);
     }
     my $lambda  = $total_depth > 0 ? $total_depth / $BED{$feature} : 0;
+    print STDERR "The lamda for $feature is $lambda\n";
     my $h_cut   = $lambda == 0 || ! defined $lambda ? 0 : Math::CDF::qpois(0.98, $lambda);
     print STDERR "low coverage dected! check $feature. high coverage cutoff \= $h_cut\n" if $h_cut < 1;
     return $h_cut;
-    
 }      
 #-----------------------------------------------------------------------------
+
+# I am handeling all gap infromation and ranges in Set::IntSpan::Fast.  
+# Critical to have the compiled version of Set::IntSpan::Fast
+# Returns the Set::IntSpan::Fast::Object
+
+
 sub Range_Depth{
 
-    my $t       = shift;
-    my $iter    = shift;
-    my $feature = shift;
 
+
+    my ($t, $iter, $feature) = @_;
+   
+    # Initializing the set
+     
     my $set = Set::IntSpan::Fast->new();   
+
+    # Last seen position
+
     my $lpos = 0;
 
     print STDERR "Current Stage: Ranging gap\n";
     while(my $l = $t->read($iter)){
 	my @l = split /\t/, $l;
+	
+	# Adds gaps for regions where there is a break 
+	# in ther coordinates
+
 	if($l[1] != $lpos + 1){
 	    my $start = $lpos+1;
 	    my $end = $l[1]-1;
 	    $set->add_range($start, $end);
 	}
+	
+	# Reassigning last position
+
 	$lpos = $l[1];
+
+	# If a position fails on depth high or low pass to 
+	# gap set
+
 	$set->add($l[1]) if $l[2] < $ldepth || $l[2] > $hdepth;
     }
+
+    # Check at end to see if we are to the end of the length of the seqid
+    # if not pass the range as a gap to the set
+
     if($lpos < $BUILD{$feature}){
 	my $start = $lpos + 1;
 	my $end = $BUILD{$feature};
 	$set->add_range($start, $end); 
     }
-    #return $set->as_string();
+
     return $set;
 }	
 #-----------------------------------------------------------------------------
 sub Process_GVF{
-    my $t      = shift;
-    my $iter   = shift;
-    my $ranges = shift;
-    my $feature = shift;
 
-
-    my $tree = Set::IntervalTree->new;
-    
-
+    # Create the GVF hash, add gaps, and parse the current feature.
+    # Iterate the Set object to add gaps the the GVF hash.
+  
+    my ($t, $iter, $ranges, $feature) = @_;
+  
     my %gvf;
-
-
+  
     print STDERR "Current Stage: adding gaps\n";
     my $it = $ranges->iterate_runs();
     while (my ( $from, $to ) = $it->()) {
@@ -224,16 +265,21 @@ sub Process_GVF{
 	$tree->insert($feature, $from, $to);
     }
 
-        
     while(my $l = $t->read($iter)){
 	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
 	    $attributes) = split /\t/, $l;
+	
+	# Contains_any makes sure the SNV/INDEL ect doesn't overlap a gap.
+
 	$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes" if ! defined $ranges->contains_any($start .. $end);
     }
     
     return(\%gvf); 
 }
 #-----------------------------------------------------------------------------
+
+# This code isn't being used
+
 sub Del_Range{  
     my $ranges  = shift;
     my $gvf     = shift;

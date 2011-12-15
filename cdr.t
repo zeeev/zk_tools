@@ -36,7 +36,7 @@ my $cdr = CDR->new('file' => $file);
 my $whatever = $cdr->Get_Seqids();
 my $pragma = $cdr->Get_Pragma();
 
-my $s = "scaffold612"; 
+my $s = "chr1"; 
 $cdr->Query_Range($s);    
 
 
