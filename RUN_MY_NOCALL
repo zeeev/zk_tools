@@ -36,19 +36,19 @@ die "$depth_zipped doesn't exist\n" if ! -e $depth_zipped;
 die "$raw_pileup_zipped doesn't exist\n" if ! -e $raw_pileup_zipped;
 
 system("gunzip $depth_zipped");
-system("gunzip $raw_pileup_zipped");
-
+#system("gunzip $raw_pileup_zipped");
 
 $depth_zipped =~ s/\.gz//;
 $raw_pileup_zipped =~ s/\.gz//;
 
 
-system("feature2gff --parser samtools_pileup $raw_pileup_zipped --fasta ~/pigeon_project_2011_5_5/data/annotation/assembly/pigeonScaf.fixedlines.fasta > $raw_pileup_zipped.gvf");
-system("NO_CALL -c $depth_zipped -g $raw_pileup_zipped.gvf -d 5 -q 20 > $raw_pileup_zipped.final.gvf 2> $raw_pileup_zipped.error");
-system("gzip $raw_pileup_zipped.gvf");
-system("gzip $depth_zipped");
-system("gzip $raw_pileup_zipped"); 
-system("bgzip $raw_pileup_zipped.final.gvf");
+#system("feature2gff --parser samtools_pileup $raw_pileup_zipped --fasta ~/pigeon_project_2011_5_5/data/annotation/assembly/pigeonScaf.fixedlines.fasta > $raw_pileup_zipped.gvf");
+#system("bgzip $raw_pileup_zipped.gvf");
+system("tabix -f -s 1 -b 4 -e 5 $raw_pileup_zipped.gvf.gz");
+system("NO_CALL -c $depth_zipped -g $raw_pileup_zipped.gvf.gz -d 5 -q 20 > $raw_pileup_zipped.final.gvf 2> $raw_pileup_zipped.error");
+#system("bgzip $depth_zipped");
+#system("bgzip $raw_pileup_zipped"); 
+#system("bgzip $raw_pileup_zipped.final.gvf");
 
 
 #-----------------------------------------------------------------------------

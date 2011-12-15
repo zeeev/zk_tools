@@ -15,7 +15,7 @@ my $usage = "
 
 Synopsis:
 
-/home/zkronenb/tools/zk_tools/CHECK_CDR_GAPS  -c file.cdr \*.gvf.gz
+/home/zkronenb/tools/zk_tools/CHECK_CDR_GAPS -b build.txt  -c file.cdr \*.gvf.gz
 
 Description:
 
@@ -25,10 +25,12 @@ No really, how the hell do you use this thing!
 
 
 my $cdr;
+my $build;
 my ($help);
 my $opt_success = GetOptions('help'       => \$help, 
 			     "cdr=s"      => \$cdr,
-    );
+			     "build=s"    => \$build,
+			     );
 
 
 
@@ -36,10 +38,14 @@ die $usage if $help || ! $opt_success;
 die $usage unless $cdr;
 
 
+my %BUILD;
+my %FEATURES;
 my %FILE_KEY;
 my @PRAGMA;
 my @FILES = @ARGV;
 
+Load_Features();
+Parse_Build($build);
 Parse_Pragma($cdr);
 $cdr = "$cdr\.gz";
 
@@ -60,22 +66,39 @@ Print_Pragma();
 #-----------------------------------------------------------------------------
 #-------------------------------- SUBROUTINES --------------------------------
 #-----------------------------------------------------------------------------
+# Loading Feature IDs to allow for rapid checks if seqid exists
+
+sub Load_Features{
+  FILE: foreach my $f (@FILES){
+      my $t    = Tabix->new(-data=>$f);
+      map {$FEATURES{$f}{$_}++} $t->getnames();
+  }
+}
+
+#-----------------------------------------------------------------------------
+# Loading Binary Tree for rapid lookup.  Looping over each feature.
+
 
 sub Build_Trees{
     my $feature = shift;
     my $tree = Set::IntervalTree->new;
-    FILE: foreach my $f (@FILES){
-	my $t    = Tabix->new(-data=>$f);
-	my $iter = $t->query($feature);
+  FILE: foreach my $f (@FILES){
+      my ($fkey) = $f =~ /(.*?)\.gz/; 
+      my $t    = Tabix->new(-data=>$f);
+      if(! exists $FEATURES{$f}{$feature}){
+	  $tree->insert($FILE_KEY{$fkey}, 0, $BUILD{$feature});	  
+      }
+      else{
+	  my $iter = $t->query($feature);
 	LINE: while(my $l = $t->read($iter)){
 	    chomp $l;
 	    my @l = split /\t/, $l;
 	    next LINE unless $l[2] eq 'gap';
-	    my ($fkey) = $f =~ /(.*?)\.gz/; 
 	    die "$f doesn't match anything in the cdr" if !defined $FILE_KEY{$fkey};
 	    $tree->insert($FILE_KEY{$fkey}, $l[3], $l[4])
-	}
-   }
+	    }
+      }
+  }
     return $tree;
 }
 
@@ -172,3 +195,15 @@ sub Print_Pragma{
     }
 }
 #-----------------------------------------------------------------------------
+   
+sub Parse_Build{
+    my $file = shift;
+    print STDERR "Current Stage: Parsing $file file\n";
+    open(FH, '<', $file) || die "cannot open $file\n";
+    while(my $l = <FH>){
+        next if $l =~ /^\s+|#/;                                                                                                                                                      
+        my @l = split /\s+/, $l;
+        die "$file is not in correct format\n" if scalar @l != 3;
+        $BUILD{$l[0]} = $l[2];
+    }
+}

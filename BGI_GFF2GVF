@@ -1,0 +1,70 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+BGI_GFF2GVF my.bgi.strange.format.gff
+
+Description:
+
+I convert a gff3 file (some format IDK) to GVF;
+
+";
+
+
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+while (<$IN>) {
+
+<<<<<<< HEAD:cdr.t
+my $s = "chr1"; 
+$cdr->Query_Range($s);    
+=======
+    chomp;
+    my @l = split /\t/, $_;
+>>>>>>> 88ed84293aaef4626f238fe1ee2f711a75b43f80:BGI_GFF2GVF
+
+
+    #change SNP to SNV
+
+    $l[2] =~ s/SNP/SNV/;
+
+
+    my @attributes = split /\s+/, $l[8];
+    map {$_ =~ s/;//g} @attributes;
+    my %attrib = map {split /=/, $_} @attributes;
+
+
+    #format variants 
+
+    $attrib{alleles} = [map {split /\//, $_} $attrib{alleles}];
+    
+
+    #print line;
+
+    print join "\t", @l[0 .. 7];
+    print "\tID=$attrib{ID}:$l[0]:$l[1]:$l[2]:$l[3]:$l[4];";
+    print "Reference_seq=$attrib{ref};";
+    print "Variant_seq=@{$attrib{alleles}}[0],@{$attrib{alleles}}[1];";
+    print "\n";
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
