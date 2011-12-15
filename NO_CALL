@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Math::CDF;
+use Tabix;
 use PDL;
 use PDL::LiteF;
 use PDL::Stats::Distr;
@@ -10,10 +11,7 @@ use Statistics::Basic::Mean;
 use Set::IntSpan::Fast;
 use Getopt::Long;
 use Math::Round::Var;
-
-
 no autovivification;
-
 
 
 my $usage = "
@@ -59,20 +57,19 @@ my $opt_success = GetOptions('help'       => \$help,
 die $usage if $help || ! $opt_success;
 die $usage unless defined $gvf && defined $depth && defined $quality; 
 
-
-
-my %GVF;
 my %CUTOFF_LOOKUP;
-
-
+my %SEQIDS;
 
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
 #-----------------------------------------------------------------------------
-Parse_Gvf($gvf);
-print STDERR "done loading gvf\n";
+
+my $gvf_seqids = Tabix->new(-data=>$gvf);
+%SEQIDS     = map {$_ => 1}  $gvf_seqids->getnames;
+
 Process_Cut_Off($coverage);
-Print_Gvf();
+print STDERR "INFO: Finished processing $gvf!\n";
+
 
 #-----------------------------------------------------------------------------
 #-------------------------------- SUBROUTINES --------------------------------
@@ -87,44 +84,40 @@ sub Process_Cut_Off {
 	next if $count ==1;
 	my @a = split /\s+/,$line if $line  ne '>';
        	my ($contig) = shift @a;
-	print STDERR "working on the feature $contig\n";
 	pop @a;
-	my $lambda = Cut_Off(\@a);
-	my $cutoff = $CUTOFF_LOOKUP{$lambda};
-	No_Call_Pos(\@a, $contig, $cutoff);
+	my $lambda  = Cut_Off(\@a);
+	my $cutoff  = $CUTOFF_LOOKUP{$lambda};
+	print STDERR "INFO: high cutoff: $cutoff\n";
+	my $ranges  = No_Call_Pos(\@a, $contig, $cutoff);
+	my $gvf_dat = Process_GVF($contig, $ranges);
+	Print_Gvf($contig, $gvf_dat) if $gvf_dat != 0;
     }
     close FH;
     $/ = '\n';
 }
 #-----------------------------------------------------------------------------
-sub Cut_Off{
-        
+sub Cut_Off{        
     my $a      = shift;
     my $sum    = 0;
     my $count  = 0;
     
     next if !defined $a;
-
     foreach my $b(@{$a}){
-	next if $b < 10;
 	$count++;
 	$sum += $b;
     }
-    
     my $rnd = Math::Round::Var->new(0.1);
-    
     my $lambda = $sum / $count if $sum > 0;
     $lambda = 0 if $sum == 0;
     $lambda = $rnd->round($lambda);
     return $lambda if exists $CUTOFF_LOOKUP{$lambda};
     my $pcutoff;
-    $pcutoff = Math::CDF::qpois(0.98, $lambda) if $lambda > 0;
+    $pcutoff = Math::CDF::qpois(0.99, $lambda) if $lambda > 0;
     $pcutoff = 0 if $lambda == 0;
     $pcutoff = $rnd->round($pcutoff);
     $CUTOFF_LOOKUP{$lambda} = $pcutoff;
     return $lambda;
 }             
-
 #-----------------------------------------------------------------------------
 sub No_Call_Pos{
     my $var    = shift;
@@ -136,80 +129,62 @@ sub No_Call_Pos{
     foreach my $d (@{$var}){
 	$count++;
 	push @nocall, $count if $d > $pcut || $d < $depth;
-	#print "$pcut\t$d\t$count\n" if $d > 100;
     }
     $set->add(@nocall); 
-    my $ranges = $set->as_string();
-    Del_Range($contig, $ranges);
+    return $set;
 }
-
 #-----------------------------------------------------------------------------
-
-sub Parse_Gvf{
-    my $file = shift;
-    open(FH, '<', $file);
-    while(<FH>){
-	chomp;
-	next if /^\s+/;
-	next if /#/;
-	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
-	    $attributes) = split /\t/, $_;
-	$GVF{$seqid}{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes";
-	
-    }
-    close FH;
-}
-
-#-----------------------------------------------------------------------------
-
-sub Del_Range{
-
-    my $contig  = shift;
+sub Process_GVF{
+    my $feature = shift;
     my $ranges  = shift;
-    my @ranges = split /,/, $ranges;
+    print STDERR "INFO: Processing: $feature\n";
     
-    for my $range (@ranges){
-	my @ab_range;
-	if($range =~ /-/){
-	    @ab_range = split /-/, $range;
-	}else{
-	    @ab_range = ($range, $range);
-	}
-	for(my $i = $ab_range[0]; $i <= $ab_range[1]; $i++){
-	    delete $GVF{$contig}{$i};
-	}
-	GVF_Line($contig, \@ab_range);
+
+    if(! defined $SEQIDS{$feature}){
+	print STDERR "WARN: $feature not found in GVF file\n";
+	return 0;
     }
-}
 
-#-----------------------------------------------------------------------------
-
-sub GVF_Line{
-    my $contig = shift;
-    my $range  = shift;
-    my @range = @{$range};
-    $GVF{$contig}{$range[0]}{$range[1]} = "gap\tno_call\t.\t.\t.\tID=$contig:$range[0]:$range[1];";    
-}
+    my $gvf_t   = Tabix->new(-data=>$gvf);
+    my $iter    = $gvf_t->query($feature);
+    my %gvf_dat;
     
+    my $it = $ranges->iterate_runs();
+    while (my ( $from, $to ) = $it->()) {
+        $gvf_dat{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
+    }
+
+    while(my $l = $gvf_t->read($iter)){
+	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
+	    $attributes) = split /\t/, $l;
+	$gvf_dat{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes" if ! defined $ranges->contains_any($start .. $end);
+    }
+    print STDERR "INFO: Done processing $feature\n";
+    return \%gvf_dat;
+}
+
 #-----------------------------------------------------------------------------
 
 sub Print_Gvf{
-   while(my($seqid, $start_hash) =  each %GVF){
-       foreach my $start (sort {$a <=> $b} keys %{$GVF{$seqid}}){
-	   foreach my $end (sort {$a <=> $b} keys %{$GVF{$seqid}{$start}}){
-	       my $value = $GVF{$seqid}{$start}{$end};
-	       my ($type, $source, $score, $strand, $phase, $attributes) = split /\t/, $value;
-	       if ($score !~ /\./ && $score < $quality){
-		   $source = "no_call";
-		   $attributes =~ s/Variant_seq=.*?;/Variant_seq=^;/;
-		   $attributes =~ s/Genotype=.*?;/Genotype=homozygous;/;
-	       }
-	       
-	       print "$seqid\t$source\t$type\t$start\t$end\t$score\t$strand\t$phase\t$attributes\n";
-	   }
-       }
-   }
+
+    my $feature = shift;
+    my $gvf_dat = shift;
+    
+  OUTER: while(my($s, $e_hash) = each %{$gvf_dat}){
+    INNER: while(my($e, $d) = each %{$gvf_dat->{$s}}){
+	my ($type, $source, $score, $strand, $phase, $attributes) = split /\t/, $d;
+	if($type ne 'gap'){
+	    if($score < $quality){
+		$attributes =~ s/Zygosity=.*?;/Zygosity=homozygous;/;
+		$attributes =~ s/Variant_seq=.*?;/Variant_seq=^;/;
+	    }
+	        print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
+		}
+	else{
+	        print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
+		}
+    }
+  }
 }
 
 #-----------------------------------------------------------------------------
-
