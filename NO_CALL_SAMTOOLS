@@ -256,8 +256,17 @@ sub Process_GVF{
   
     my ($t, $iter, $ranges, $feature) = @_;
     my %gvf;
+<<<<<<< HEAD
+
+    print STDERR "Current Stage: adding gaps\n";
+    my $it = $ranges->iterate_runs();
+    while (my ( $from, $to ) = $it->()) {
+        $gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
+    }
+=======
   
     #Loop the GVF;
+>>>>>>> 073ba3d871a9a798a775bc08fe00e8f171b96808
 
     while(my $l = $t->read($iter)){
 	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
