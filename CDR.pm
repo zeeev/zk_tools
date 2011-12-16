@@ -271,8 +271,8 @@ sub Query_Range {
 #	my @group = (40, 0, 3, 31, 35, 19, 24);
 #	my @group = (1,2,3,4);
 #	$self->FST(\@group);
-       $self->HWE_Departure;	
-#	$self->_Print_Beagle();
+#       $self->HWE_Departure;	
+	$self->_Print_Beagle();
 #	$self->_Print_MAP();
    }
 }
