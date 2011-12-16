@@ -257,12 +257,11 @@ sub Process_GVF{
     my ($t, $iter, $ranges, $feature) = @_;
   
     my %gvf;
-  
+
     print STDERR "Current Stage: adding gaps\n";
     my $it = $ranges->iterate_runs();
     while (my ( $from, $to ) = $it->()) {
         $gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
-	$tree->insert($feature, $from, $to);
     }
 
     while(my $l = $t->read($iter)){
