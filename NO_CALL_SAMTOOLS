@@ -255,25 +255,90 @@ sub Process_GVF{
     # Iterate the Set object to add gaps the the GVF hash.
   
     my ($t, $iter, $ranges, $feature) = @_;
-  
     my %gvf;
   
-    print STDERR "Current Stage: adding gaps\n";
-    my $it = $ranges->iterate_runs();
-    while (my ( $from, $to ) = $it->()) {
-        $gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
-	$tree->insert($feature, $from, $to);
-    }
+    #Loop the GVF;
 
     while(my $l = $t->read($iter)){
 	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
 	    $attributes) = split /\t/, $l;
 	
 	# Contains_any makes sure the SNV/INDEL ect doesn't overlap a gap.
+	
+	if(! defined $ranges->contains_any($start .. $end)){
+	    $gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes" 
+	    }
+	
+	# If contains any is true we want to process genotypes contained in 
+	# attriubte line.
+	
+	else{
+	    
+	    # Remove the gap position to allow for the mutation
+	    
+	    $set->remove_range($start, $end);
+	
+	    #load attributes and check for key value pairs;
+	    
+	    my %attributes;	    
+	    foreach my $key_val_pair (split /;/, $attributes){
+		my ($key, $value) = split /=/, $key_val_pair;
+		die "Attribute line is not conform to spefication:\n$l\n" if ! defined $key || ! defined $value;
+		$attributes{$key} = $value;
+	    }
+	    my $var = $attributes{Variant_seq}; 
+	    my $ref = $attributes{Reference_seq};
+	
+	    # if the variant line is longer than three we know its a het or some strange polymorphic
+	    # site within an indvidual.  We are assuming these sites shouldn't be touched?  Chad's thoughts. 
+	    
+	    if(length $var  >= 3 ){
+		$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes";
+	    }
+	    else{
+		
+		# we know we are homozygous non ref
+		
+		my @genotype = grep {!/$ref/} split /,/, $var;
+                push @genotype, '^';
+		if(scalar @genotype > 2){
+		    @genotype = ('^', '^');
+		}
+                $attributes{Variant_seq} = join ":", @genotype;
 
-	$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes" if ! defined $ranges->contains_any($start .. $end);
+		#maintaining some order to my hash
+		
+		my @attrib;
+		my @order = ("ID","Variant_seq", "Reference_seq", "Total_reads", "Zygosity");
+		foreach my $o (@order){
+		    push @attrib, join "=", ($o, $attributes{$o});
+		    delete $attributes{$o};
+		    
+		}
+		
+		#loading the rest of the key value
+		
+		while(my($k, $v) = each %attributes){
+		    push @attrib, join "=", ($k,  $v);
+		}
+
+		#joining key values
+
+		$attriubtes = join ";", @attrib;
+		
+		#loading mutation into gvf.....
+		
+		$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes;";
+	    }
+	}   
+	
+	print STDERR "Current Stage: adding gaps\n";
+	my $it = $ranges->iterate_runs();
+	while (my ( $from, $to ) = $it->()) {
+	    $gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
+	}
+	
     }
-    
     return(\%gvf); 
 }
 #-----------------------------------------------------------------------------
