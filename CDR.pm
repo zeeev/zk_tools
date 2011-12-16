@@ -623,7 +623,7 @@ sub _Print_Beagle{
 
     return if $self->{line}{refined}{type} ne 'SNV';
     my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
-    my $as       = join /","/, @alleles;
+    my $as       = join ",", @alleles;
 
     print "M\t";
     print "$self->{line}{refined}{seqid}:";
@@ -694,27 +694,47 @@ sub fisher_yates_shuffle {
 # This function counts the number of non reference alleles in the array passed
 # into the function
 
-sub _deminish{
+sub Deminish_Returns{
 
-    my ($self, $shuffled) = @_;
+    my ($self, $chrs, $shuffled) = @_;
+
+    my %non_ref= ('SNV' => 0,
+		  'INS' => 0,
+		  'DEL' => 0,
+		  'NOC' => 0,
+		  );
     
-    my @non_ref_SNV;
-    my @non_ref_INS;
-    my @non_ref_DEL;
     
-    foreach my $indv (@{$shuffled}){
-	my @g = split /:/, $self->{'line'}{'genotypes'}{$indv};
-	foreach my $genotype (@g){
+  CHR: foreach my $c (@{$chrs}){
+      my $t = Tabix->new(-data => $self->{'file'});
+      my $i = $t->query($c);
+    LINE: while(my $l = $t->read($i)){
+	next LINE if ! defined $l;
+	$self->{'line'}{'raw'} = $l;
+	$self->_Parse_Line;
+	next LINE if !defined $self->{'line'}{'genotypes'};
+	
+      INDV: foreach my $indv (@{$shuffled}){
+	  my @g = split /:/, $self->{'line'}{'genotypes'}{$indv}{genotype};
+	ALLELE: foreach my $genotype (@g){
 	    if ($genotype ne $self->{line}{refined}{ref}){
-		push @non_ref_SNV if $self->{line}{refined}{type} eq 'SNV';
-		push @non_ref_INS if $self->{line}{refined}{type} eq 'insertion';
-		push @non_ref_DEL if $self->{line}{refined}{type} eq 'deletion';
+		if($genotype eq '^'){
+		    $non_ref{NOC}++;
+		}
+		else{   
+		    $non_ref{SNV}++ if $self->{line}{refined}{type} eq 'SNV';
+		    $non_ref{INS}++ if $self->{line}{refined}{type} eq 'insertion';
+		    $non_ref{DEL}++ if $self->{line}{refined}{type} eq 'deletion';
+		}
 	    }
 	}
+      }
     }
+  }
+    return \%non_ref; 
 }
-
 #-----------------------------------------------------------------------------   
+
 1;
 
 
