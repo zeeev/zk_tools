@@ -271,8 +271,8 @@ sub Query_Range {
 #	my @group = (40, 0, 3, 31, 35, 19, 24);
 #	my @group = (1,2,3,4);
 #	$self->FST(\@group);
-#       $self->HWE_Departure;	
-	$self->_Print_Beagle();
+       $self->HWE_Departure;	
+#	$self->_Print_Beagle();
 #	$self->_Print_MAP();
    }
 }
@@ -445,19 +445,26 @@ sub HWE_Departure{
     my $AA = 0;
     my $AB = 0; 
     my $BB = 0;
+    my $AN = 0;
+    my $BN = 0;
+
 
     $AB = $counts[2]->{"$alleles[0]:$alleles[1]"} if defined $counts[2]->{"$alleles[0]:$alleles[1]"};
     $AA = $counts[2]->{"$ref:$ref"} if defined $counts[2]->{"$ref:$ref"};
     $BB = $counts[2]->{"$alt:$alt"} if defined $counts[2]->{"$alt:$alt"};
+    $AN = $counts[2]->{"$ref:\^"} if defined $counts[2]->{"$ref:\^"};
+    $BN = $counts[2]->{"$alt:\^"} if defined $counts[2]->{"$alt:\^"};
     
-    my $p_pp =  _Chi_Lookup($exp_pp, $AA);
-    my $p_pq =  _Chi_Lookup($exp_pq, $AB);
-    my $p_qq =  _Chi_Lookup($exp_qq, $BB);
 
-    my $chi = $p_pp + $p_pq + $p_qq;
-    my $p_value   =  1 - Math::CDF::pchisq($chi, 1);
+   # my $p_pp =  _Chi_Lookup($exp_pp, $AA);
+   # my $p_pq =  _Chi_Lookup($exp_pq, $AB);
+   # my $p_qq =  _Chi_Lookup($exp_qq, $BB);
+
+    #my $chi = $p_pp + $p_pq + $p_qq;
+    #my $p_value   =  1 - Math::CDF::pchisq($chi, 1);
     
-    print "$self->{line}{refined}{start}\t$p_pp\t$AA\t$AB\t$BB\t$exp_pp\t$exp_pq\t$exp_qq\t$p\t$q\t$chi\t$p_value\n";
+    #print "$self->{line}{refined}{start}\t$p_pp\t$AA\t$AB\t$BB\t$exp_pp\t$exp_pq\t$exp_qq\t$p\t$q\t$chi\t$p_value\n";
+    print "$self->{line}{refined}{start}\t$AA\t$AB\t$BB\t$AN\t$BN\n";
 } 
 
 #-----------------------------------------------------------------------------   

@@ -139,7 +139,7 @@ sub Add_No_Call {
     my $existing_nocall;
     my @nocall_index;
     for(my $i = 6; $i <= scalar @{$l} - 1; $i++){
-	if(@{$l}[$i] =~ /\^/){
+	if(@{$l}[$i] =~ /\^:\^/){
 	    $existing_nocall = @{$l}[$i];
 	    push @nocall_index, $i;
 	}	

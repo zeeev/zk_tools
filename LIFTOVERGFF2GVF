@@ -10,7 +10,7 @@ my $usage = "
 
 Synopsis:
 
-/home/zkronenb/tools/zk_tools/LIFTOVERGFF2GVF <How the hell do you use this thing>
+/home/zkronenb/tools/zk_tools/LIFTOVERGFF2GVF -f your.silly.file
 
 Description:
 
