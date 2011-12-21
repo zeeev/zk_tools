@@ -2,6 +2,8 @@ package CDR;
 use Tabix;
 use strict;
 use warnings;
+use Data::Dumper;
+use PDL;
 use Math::CDF;
 use Set::IntSpan::Fast;
 use List::MoreUtils qw(uniq);
@@ -669,22 +671,33 @@ sub LD{
     
     my @snp;
     my $count = 0; 
-
+    
+    # A PDL data stucture. 
+    my @pdl;
+    my @MARKERS;
+    	
     my ($self, $args) = @_;
     my $t = Tabix->new(-data => $self->{'file'});
     my $i = $t->query($args);
   LINE: while(my $l = $t->read($i)){
-      my @l = split /\t/, $l;
+      $self->{line}{raw} = $l;
       $self->_Parse_Line();
-
-      my @genotypes;
+      next unless $self->{line}{refined}{type} eq 'SNV';
+      $count++;
+      my @vals;
       
-      foreach my $key (%{$self->{line}{genotypes}}){
-	  my @genotype = split /:/, $self->{line}{genotypes}{$key};
-	  $genotype[0] ne $genotype[1] ?  push @genotypes , 1 : 
-	      push @genotypes, 0;
-      }
+    GENOTYES: foreach my $key (sort {$a <=>$b} keys %{$self->{line}{genotypes}}){
+	my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
+	push @vals, 3 if $genotype[0] eq '^';
+	push @vals, 0 if $genotype[0] eq $genotype[1];
+	push @vals, 1 if $genotype[0] ne $genotype[1];
+    }
+      
+      $pdl[$count] = pdl @vals;
   }
+    print STDERR "Info: Finished loading line\n";
+    my $piddle = pdl(@pdl);
+    print "test\n";
 }
 #-----------------------------------------------------------------------------   
 sub fisher_yates_shuffle {

@@ -65,10 +65,8 @@ sub Handel_Run{
     my $depth_count  = Count_Depth($cov_t, $cov_iter);
     $hdepth                 = Estimate_High($depth_count, $feature) if ! defined $hdepth;
     $cov_iter               = $cov_t->query($feature);
-    my $ranges              = Range_Depth($cov_t, $cov_iter, $feature);
-    my $gvf_ranged          = Process_GVF($gvf_t, $gvf_iter, $ranges, $feature);
-#    my $gvf_depth           = Del_Range($ranges, $gvf_range, $feature); 
-#    my ($gvf_depth, $tree)  = Del_Range($ranges, $gvf_range, $feature); 
+    my ($lranges, $hranges) = Range_Depth($cov_t, $cov_iter, $feature);
+    my $gvf_ranged          = Process_GVF($gvf_t, $gvf_iter, $lranges, $hranges, $feature);
     Print_Gvf($feature, $gvf_ranged);
 }
 #-----------------------------------------------------------------------------
@@ -199,17 +197,13 @@ sub Estimate_High{
 # Critical to have the compiled version of Set::IntSpan::Fast
 # Returns the Set::IntSpan::Fast::Object
 
-
 sub Range_Depth{
-
-
-
     my ($t, $iter, $feature) = @_;
    
     # Initializing the set
      
-    my $set = Set::IntSpan::Fast->new();   
-
+    my $lset = Set::IntSpan::Fast->new();   
+    my $hset = Set::IntSpan::Fast->new();
     # Last seen position
 
     my $lpos = 0;
@@ -224,7 +218,7 @@ sub Range_Depth{
 	if($l[1] != $lpos + 1){
 	    my $start = $lpos+1;
 	    my $end = $l[1]-1;
-	    $set->add_range($start, $end);
+	    $lset->add_range($start, $end);
 	}
 	
 	# Reassigning last position
@@ -234,7 +228,8 @@ sub Range_Depth{
 	# If a position fails on depth high or low pass to 
 	# gap set
 
-	$set->add($l[1]) if $l[2] < $ldepth || $l[2] > $hdepth;
+	$lset->add($l[1]) if $l[2] < $ldepth;
+	$hset->add($l[1]) if $l[2] > $hdepth;
     }
 
     # Check at end to see if we are to the end of the length of the seqid
@@ -243,10 +238,10 @@ sub Range_Depth{
     if($lpos < $BUILD{$feature}){
 	my $start = $lpos + 1;
 	my $end = $BUILD{$feature};
-	$set->add_range($start, $end); 
+	$lset->add_range($start, $end); 
     }
 
-    return $set;
+    return $lset, $hset;
 }	
 #-----------------------------------------------------------------------------
 sub Process_GVF{
@@ -254,19 +249,18 @@ sub Process_GVF{
     # Create the GVF hash, add gaps, and parse the current feature.
     # Iterate the Set object to add gaps the the GVF hash.
   
-    my ($t, $iter, $ranges, $feature) = @_;
+    my ($t, $iter, $lranges, $hranges, $feature) = @_;
     my %gvf;
 
     #Loop the GVF;
-
-
+    
     while(my $l = $t->read($iter)){
 	my ($seqid, $source, $type, $start, $end, $score, $strand, $phase, 
 	    $attributes) = split /\t/, $l;
 	
-	# Contains_any makes sure the SNV/INDEL ect doesn't overlap a gap.
+	# Contains_any makes sure the SNV/INDEL ect doesn't overlap a high or low gap.
 	
-	if(! defined $ranges->contains_any($start .. $end)){
+	if(! defined $lranges->contains_any($start .. $end) && !defined $hranges->contains_any($start .. $end)){
 	    $gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes" 
 	    }
 	
@@ -275,123 +269,95 @@ sub Process_GVF{
 	
 	else{
 	    
-	    # Remove the gap position to allow for the mutation
+	    #Parse the Attributes.
 	    
-	    $ranges->remove_range($start, $end);
-	
-	    #load attributes and check for key value pairs;
-	    
-	    my %attributes;	    
+	    my %attributes;
 	    foreach my $key_val_pair (split /;/, $attributes){
 		my ($key, $value) = split /=/, $key_val_pair;
 		die "Attribute line is not conform to spefication:\n$l\n" if ! defined $key || ! defined $value;
 		$attributes{$key} = $value;
 	    }
-	    my $var = $attributes{Variant_seq}; 
-	    my $ref = $attributes{Reference_seq};
-	
-	    # if the variant line is longer than three we know its a het or some strange polymorphic
-	    # site within an indvidual.  We are assuming these sites shouldn't be touched?  Chad's thoughts. 
 	    
-	    if(length $var  >= 3 ){
-		$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes";
+            if($score < $quality){
+		$attributes{Zygosity} = '.';
+                $attributes{Variant_seq} = '^:^';
+		$attributes{Nocall} = 'low_quality';
 	    }
-	    else{
+	    
+	    $attributes{Zygosity} = '.';
+	    
+	    #checking gaps
+	    
+	    if (defined $lranges->contains_any($start .. $end)){
 		
-		# we know we are homozygous non ref
+		$lranges->remove_range($start, $end);
 		
-		my @genotype = grep {!/$ref/} split /,/, $var;
-                push @genotype, '^';
-		if(scalar @genotype > 2){
+		# if the variant line is longer than three we know its a het or some strange polymorphic
+		# site within an indvidual.  We are assuming these sites shouldn't be touched?  Chad's thoughts. 
+		
+		my @genotype = grep {!/$attributes{Reference_seq}/} split /,/, $var;
+		if(scalar @genotype > 1){
 		    @genotype = ('^','^');
 		}
-                $attributes{Variant_seq} = join ",", @genotype;
-
-		#maintaining some order to my hash
-		
-		my @attrib;
-		my @order = ("ID","Variant_seq", "Reference_seq", "Total_reads", "Zygosity");
-		foreach my $o (@order){
-		    push @attrib, join "=", ($o, $attributes{$o});
-		    delete $attributes{$o};
-		    
+		else{
+		    push @genotype,'^';
 		}
-		
-		#loading the rest of the key value
-		
-		while(my($k, $v) = each %attributes){
-		    push @attrib, join "=", ($k,  $v);
-		}
-
-		#joining key values
-
-		$attributes = join ";", @attrib;
-		
-		#loading mutation into gvf.....
-		
-		$gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes;";
+		$attributes{Variant_seq} = join ",", @genotype;	    
+		$attributes{Nocall} = 'low_coverage';
 	    }
-	}   
+	    
+	    #high depth does not get called hemizygous.
+	    
+	    else{    
+		
+		$hranges->remove_range($start, $end);
+		$attributes{Zygosity} = '.';
+		$attributes{Variant_seq} = '^:^';	
+		$attributes{Nocall} = 'high_coverage';
+	    }
+	    
+	    my @attrib;
+	    my @order = ("ID","Variant_seq", "Reference_seq", "Total_reads", "Zygosity");
+	    foreach my $o (@order){
+		push @attrib, join "=", ($o, $attributes{$o});
+		delete $attributes{$o};
+	    }
+	    
+	    while(my($k, $v) = each %attributes){
+		push @attrib, join "=", ($k,  $v);
+	    }
+	    
+	    $attributes = join ";", @attrib;	
+	    $gvf{$start}{$end} = "$type\t$source\t$score\t$strand\t$phase\t$attributes;";
+	    
+	}  
     }
-    
     
     print STDERR "Current Stage: adding gaps\n";
-    my $it = $ranges->iterate_runs();
+    my $it = $lranges->iterate_runs();
     while (my ( $from, $to ) = $it->()) {
-	$gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";
+	$gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to:low_depth;";
     }
-  
+    
+    my $it2 = $hranges->iterate_runs();
+    while (my ( $from, $to ) = $it2->()) {
+        $gvf{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to:high_depth;";
+    }
+    
     return(\%gvf); 
 }
 #-----------------------------------------------------------------------------
 
-# This code isn't being used
-
-sub Del_Range{  
-    my $ranges  = shift;
-    my $gvf     = shift;
-    my $feature = shift;
-
-   # my $tree = Set::IntervalTree->new;
-
-   
-   # setinterval implementation
-    my $iter = $ranges->iterate_runs();
-    while (my ( $from, $to ) = $iter->()) {
-    	$gvf->{$from}{$to} = "gap\tno_call\t.\t.\t.\tID=$feature:$from:$to;";        
-    }
- 
-    # my @ranges = split /,/, $ranges;
-    # for my $range (@ranges){
-    # my @ab_range = $range =~ /-/ ? split /-/, $range : ($range, $range);
-#	$tree->insert("$feature:$ab_range[0]:$ab_range[1]", $ab_range[0], $ab_range[1]);
-#	$gvf->{$ab_range[0]}{$ab_range[1]} = "gap\tno_call\t.\t.\t.\tID=$feature:$ab_range[0]:$ab_range[1];";    
-#    }
-    #return ($gvf, $tree);
-    return $gvf;
-}
-#-----------------------------------------------------------------------------
 sub Print_Gvf{
-
+    
     my $feature = shift;
     my $gvf     = shift;
-   # my $tree    = shift;
-   # my $set     = shift;
- 
+    
   OUTER: while(my($s, $e_hash) = each %{$gvf}){
     INNER: while(my($e, $d) = each %{$gvf->{$s}}){
 	my ($type, $source, $score, $strand, $phase, $attributes) = split /\t/, $d;
-	if($type ne 'gap'){
-	    if($score < $quality){
-		$attributes =~ s/Zygosity=.*?;/Zygosity=homozygous;/;
-		$attributes =~ s/Variant_seq=.*?;/Variant_seq=^;/;
-	    }
-	    print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
+	print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
 	}
-	else{
-	    print "$feature\t$source\t$type\t$s\t$e\t$score\t$strand\t$phase\t$attributes\n"   
-	}
-    }
   }
 }
 #-----------------------------------------------------------------------------
