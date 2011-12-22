@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use Data::Dumper;
 use PDL;
+use PDL::Stats::Basic;
 use Math::CDF;
 use Set::IntSpan::Fast;
 use List::MoreUtils qw(uniq);
@@ -698,6 +699,21 @@ sub LD{
     print STDERR "Info: Finished loading line\n";
     my $piddle = pdl(@pdl);
     print "test\n";
+
+
+    my %r_data;
+
+    my $n_row =  $piddle->slice('0,:')->nelem;
+    
+  OUTER: for ($i = 0; $i <= $n_row; $i++){
+      my $loc_a = $piddle->slice(,$i);
+    INNER: for ($j = 0; $i <= $n_row; $i++){
+	my $loc_b = $piddle->slice(,$j);
+	my ($sub_a, $sub_b) = where($loc_b, $loc_c, $loc_b < 3 && $loc_c <3);
+	my $cov =  $sub_a->cov($b);
+	$r_data{$i}{$j} = $cov;
+    }
+  }   
 }
 #-----------------------------------------------------------------------------   
 sub fisher_yates_shuffle {
