@@ -685,24 +685,22 @@ sub LD{
     
     
     return if ! defined $it;
-
+    
     my $n_indv = scalar @{$indvs};
     my $n_alleles = 2 * $n_indv;
-
+    
   LINE: while(my $l = $tabix->read($it)){
       $self->{line}{raw} = $l;
       $self->_Parse_Line();
       
       next LINE unless $self->{line}{refined}{type} eq 'SNV';
-
+      
       my $ref = $self->{line}{refined}{ref}[0];
       $self->_Group($indvs);
       my @counts  = _Count_Genotypes($self->{line}{group_A});
       my @alleles = sort {$a cmp $b} keys %{$counts[1]};
       
       next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
-      
-      
       next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;        
       next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.90 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.1;
       $markers{$count} = $self->{line}{refined}{start};
@@ -713,10 +711,10 @@ sub LD{
 # AB = 1 
 # BB = 2
 # ^^ = 3
-
+      
     GENOTYES: foreach my $key (@{$indvs}){
 	my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
-
+	
 #dont need this for nocall	
 #if($genotype[0] eq '^'){
 #    push @vals, 3;
@@ -757,14 +755,17 @@ sub LD{
     }
   }
     
+    my @print_dat;
+    
     while(my($loc1, $loc2_dat) = each %r_data){
 	my $pos1 = $markers{$loc1};
 	while(my ($loc2, $cov) = each %{$loc2_dat}){
 	    my $pos2 = $markers{$loc2};
 	    my $p_diff = abs($pos1 - $pos2);
-	    print "$args\t$pos1\t$pos2\t$p_diff\t$cov\n"; 
+	    push @print_dat, "$args\t$pos1\t$pos2\t$p_diff\t$cov"; 
 	}
     }
+    return @print_dat;
 }
 #-----------------------------------------------------------------------------   
 sub fisher_yates_shuffle {
