@@ -1,0 +1,103 @@
+#!/usr/bin/perl
+
+use lib '/home/zkronenb/tools/zk_tools/';
+use CDR;
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+use Parallel::ForkManager;
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+cdr.t -f cdr  -t  10 (number of processors)
+
+Description:
+
+
+
+";
+
+
+my ($help);
+my $file;
+my $n_threads;
+my $opt_success = GetOptions('help'      => \$help,
+			     "file=s"    => \$file,
+			     "threads=s" => \$n_threads);
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file && $n_threads;
+my $cdr = CDR->new('file' => $file);
+
+#excluding C-rup 
+
+my @indvs = (0..35,37..40);
+
+my @features = @{$cdr->Get_Seqids};
+
+while(@features){
+    my @child;
+    my @temp_features;
+    if (scalar @features > $n_threads){
+	for(my $i = 1; $i <= $n_threads; $i++){
+	    my $feature = shift @features;
+	    push @temp_features, $feature;
+	}
+    }
+    else{
+	for(my $i = 1; $i <= scalar @features; $i++){
+	    my $feature = shift @features;
+	    push @temp_features, $feature;
+	}
+    }
+    Fork_Threads(\@indvs, \@temp_features, $cdr);
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub Fork_Threads{
+    my ($indvs, $f, $cdr) = @_;
+    
+    my $pm = new Parallel::ForkManager($n_threads);
+  FEATURE: foreach my $feature (@{$f}){
+        next FEATURE if ! defined $feature;
+	$pm->start and next;
+	print STDERR "INFO: Working on $feature\n";
+	$cdr->LD($indvs, $feature);
+	$pm->finish;
+    }
+    $pm->wait_all_children;
+}
+
+
+
+
+
+#    my @childs;
+#    FEATURE: foreach my $feature (@{$f}){
+#        next FEATURE if ! defined $feature;
+#        my $pid = fork();
+#        if ($pid) {
+#            print STDERR "This is parent process speaking:  I have spawned: $pid\n";
+#            push(@childs, $pid);
+#        }elsif ($pid == 0) {
+#            # child                                                                              
+#	    $cdr->LD($indvs, $feature);
+#	} else {
+#            die "couldnt fork: $!\n";
+#        }
+#    }
+#    foreach my $c (@childs){
+#	waitpid($c, 0);
+#    }
+#    print "\n";
+#}
+
+
