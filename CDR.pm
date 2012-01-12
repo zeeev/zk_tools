@@ -8,6 +8,8 @@ use PDL::Stats::Basic;
 use Math::CDF;
 use Set::IntSpan::Fast;
 use List::MoreUtils qw(uniq);
+use Math::BigFloat;
+
 
 #-----------------------------------------------------------------------------
 #--------------------------------- Constructor -------------------------------
@@ -367,7 +369,6 @@ sub _Parse_Alleles{
     my $genotypes = shift;
     my @genotypes;
 
-
     while(my ($indv, $g) = each %{$genotypes}){
 	while(my ($info, $d) = each %{$g}){
 	    push @genotypes, split /:/, $d if $info eq 'genotype';
@@ -386,7 +387,10 @@ sub _Count_Genotypes{
 
     my %allele_counts;
     my %genotype_counts;
- 
+    
+    $allele_counts{'^'}     = 0;
+    $genotype_counts{'^:^'} = 0;
+
     while( my($info, $value) = each %{$info_hash}){
 	while(my($key, $value_2) = each %{$value}){
 	    if ($key =~ /genotype/){
@@ -398,7 +402,7 @@ sub _Count_Genotypes{
     }
     
     my %total;
-
+    
     while( my ($key, $value) = each %genotype_counts){
 	$total{'genotype_counts'}{'nocall'} += $value if $key =~ /\^/;
 	$total{'genotype_counts'}{'called'} += $value if $key !~ /\^/;
@@ -561,8 +565,8 @@ sub _Group{
 	    $groupB_DAT{$indv} = $indv_hash;
 	} 
     }
-    $self->{'line'}{'group_A'} = \%groupA_DAT;
-    $self->{'line'}{'group_B'} = \%groupB_DAT; 
+    $self->{line}{group_A} = \%groupA_DAT;
+    $self->{line}{group_B} = \%groupB_DAT; 
 }
 
 #-----------------------------------------------------------------------------   
@@ -669,51 +673,98 @@ sub Print_Beagle_Header{
 
 #-----------------------------------------------------------------------------   
 sub LD{
-    
-    my @snp;
+    my ($self, $indvs, $args) = @_;
     my $count = 0; 
-    
-    # A PDL data stucture. 
+    my %markers;
     my @pdl;
-    my @MARKERS;
-    	
-    my ($self, $args) = @_;
-    my $t = Tabix->new(-data => $self->{'file'});
-    my $i = $t->query($args);
-  LINE: while(my $l = $t->read($i)){
+    
+    return if ! defined $args;
+    
+    my $tabix = Tabix->new(-data => $self->{'file'});
+    my $it = $tabix->query($args);
+    
+    
+    return if ! defined $it;
+
+    my $n_indv = scalar @{$indvs};
+    my $n_alleles = 2 * $n_indv;
+
+  LINE: while(my $l = $tabix->read($it)){
       $self->{line}{raw} = $l;
       $self->_Parse_Line();
-      next unless $self->{line}{refined}{type} eq 'SNV';
-      $count++;
+      
+      next LINE unless $self->{line}{refined}{type} eq 'SNV';
+
+      my $ref = $self->{line}{refined}{ref}[0];
+      $self->_Group($indvs);
+      my @counts  = _Count_Genotypes($self->{line}{group_A});
+      my @alleles = sort {$a cmp $b} keys %{$counts[1]};
+      
+      next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
+      
+      
+      next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;        
+      next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.90 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.1;
+      $markers{$count} = $self->{line}{refined}{start};
+      
       my @vals;
       
-    GENOTYES: foreach my $key (sort {$a <=>$b} keys %{$self->{line}{genotypes}}){
+# AA = 0
+# AB = 1 
+# BB = 2
+# ^^ = 3
+
+    GENOTYES: foreach my $key (@{$indvs}){
 	my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
-	push @vals, 3 if $genotype[0] eq '^';
-	push @vals, 0 if $genotype[0] eq $genotype[1];
-	push @vals, 1 if $genotype[0] ne $genotype[1];
+
+#dont need this for nocall	
+#if($genotype[0] eq '^'){
+#    push @vals, 3;
+#}
+	if($genotype[0] ne $ref && $genotype[1] ne $ref){
+	    push @vals, 2;
+	}
+	if($genotype[0] ne $genotype[1]){
+	    push @vals, 1;
+	}
+	else{
+	    push @vals, 0;
+	}
     }
-      
-      $pdl[$count] = pdl @vals;
+      $pdl[$count++] = pdl @vals;    
   }
-    print STDERR "Info: Finished loading line\n";
+    
+# A PDL data stucture. 
+    
+    return if scalar @pdl <= 1; 
     my $piddle = pdl(@pdl);
-    print "test\n";
-
-
+    
+    
     my %r_data;
-
     my $n_row =  $piddle->slice('0,:')->nelem;
     
-  OUTER: for ($i = 0; $i <= $n_row; $i++){
-      my $loc_a = $piddle->slice(,$i);
-    INNER: for ($j = 0; $i <= $n_row; $i++){
-	my $loc_b = $piddle->slice(,$j);
-	my ($sub_a, $sub_b) = where($loc_b, $loc_c, $loc_b < 3 && $loc_c <3);
-	my $cov =  $sub_a->cov($b);
-	$r_data{$i}{$j} = $cov;
+  OUTER: for (my $i = 0; $i < $n_row; $i++){
+      my $loc_a = $piddle->PDL::slice(":,$i");
+    INNER: for (my $j = 0; $j < $n_row; $j++){
+	next INNER if defined $r_data{$i}{$j};
+	next OUTER if abs($markers{$i} - $markers{$j}) >= 500000;
+	my $loc_b = $piddle->PDL::slice(":,$j");
+#dont need this because we are not allowing for NC	
+#my ($sub_a, $sub_b) = where($loc_a, $loc_b, $loc_a < 3 & $loc_b <3);
+#	my $cor =  $sub_a->corr($sub_b)->at;
+	my $cor =  $loc_a->corr($loc_b)->at(0);
+	$r_data{$i}{$j} = $cor**2;
     }
-  }   
+  }
+    
+    while(my($loc1, $loc2_dat) = each %r_data){
+	my $pos1 = $markers{$loc1};
+	while(my ($loc2, $cov) = each %{$loc2_dat}){
+	    my $pos2 = $markers{$loc2};
+	    my $p_diff = abs($pos1 - $pos2);
+	    print "$args\t$pos1\t$pos2\t$p_diff\t$cov\n"; 
+	}
+    }
 }
 #-----------------------------------------------------------------------------   
 sub fisher_yates_shuffle {
@@ -727,48 +778,155 @@ sub fisher_yates_shuffle {
 }
 
 #-----------------------------------------------------------------------------   
-# This function counts the number of non reference alleles in the array passed
-# into the function
+sub Distance_Matrix{
+    my ($self, $indvs, $args) = @_;
+    my $count = 0;
+    my %markers;
+    my @pdl;
 
-sub Deminish_Returns{
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $it = $t->query($args);
 
-    my ($self, $chrs, $shuffled) = @_;
+    return if ! defined $it;
 
-    my %non_ref= ('SNV' => 0,
-		  'INS' => 0,
-		  'DEL' => 0,
-		  'NOC' => 0,
-		  );
+    my $n_indv = scalar @{$indvs};
+    my $n_alleles = 2 * $n_indv;
+
+  LINE: while(my $l = $t->read($it)){
+      $self->{line}{raw} = $l;
+      $self->_Parse_Line();
+      my $ref = $self->{line}{refined}{ref}[0];
+      my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+      next LINE unless $self->{line}{refined}{type} eq 'SNV';
+      next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
+      $self->_Group($indvs);
+      my @counts  = _Count_Genotypes($self->{line}{group_A});
+      next LINE if $counts[0]->{genotype_counts}{nocall} > 0; 
+      next LINE if ($counts[1]->{$alleles[1]} / $n_alleles) > 0.90 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.1;
+      $markers{$count} = $self->{line}{refined}{start};
+      my @vals;
+# AA = 0
+# AB = 1
+# BB = 2                                                                                                                                                                                                                                                                                        
+# ^^ = 3                                                                                                                                                                                                                                                                                                             
+    GENOTYES: foreach my $key (@{$indvs}){
+        my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
+        if($genotype[0] eq '^'){
+            push @vals, 3;
+        }
+        elsif($genotype[0] ne $ref){
+            push @vals, 2;
+        }
+        elsif($genotype[0] ne $genotype[1]){
+            push @vals, 1;
+        }
+        else{
+            push @vals, 0;
+        }
+    }
+      $pdl[$count++] = pdl @vals;
+  }
     
+# A PDL data stucture.                                                                                                                                                                                                                                                                                                  
+    return if scalar @pdl <= 1;
+    my $piddle = pdl(@pdl);
     
-  CHR: foreach my $c (@{$chrs}){
-      my $t = Tabix->new(-data => $self->{'file'});
-      my $i = $t->query($c);
-    LINE: while(my $l = $t->read($i)){
-	next LINE if ! defined $l;
-	$self->{'line'}{'raw'} = $l;
-	$self->_Parse_Line;
-	next LINE if !defined $self->{'line'}{'genotypes'};
-	
-      INDV: foreach my $indv (@{$shuffled}){
-	  my @g = split /:/, $self->{'line'}{'genotypes'}{$indv}{genotype};
-	ALLELE: foreach my $genotype (@g){
-	    if ($genotype ne $self->{line}{refined}{ref}){
-		if($genotype eq '^'){
-		    $non_ref{NOC}++;
-		}
-		else{   
-		    $non_ref{SNV}++ if $self->{line}{refined}{type} eq 'SNV';
-		    $non_ref{INS}++ if $self->{line}{refined}{type} eq 'insertion';
-		    $non_ref{DEL}++ if $self->{line}{refined}{type} eq 'deletion';
-		}
-	    }
-	}
-      }
+    my @dist;
+    my @distance_matrix;
+
+    my $n_col =  $piddle->slice(':,0')->nelem;
+
+  OUTER: for (my $i = 0; $i < $n_col; $i++){
+      my $col_a = $piddle->PDL::slice("$i,:");
+    INNER: for (my $j = 0; $j < $n_col; $j++){
+        next INNER if defined $dist[$i][$j];
+        my $col_b = $piddle->PDL::slice("$j,:");  
+	my $sum = PDL::sum($col_a - $col_b);
+        $dist[$i][$j] = $sum;
     }
   }
-    return \%non_ref; 
+
+    print "test\n";
+
 }
+
+
+
+#-----------------------------------------------------------------------------   
+sub Print_PLINK{
+
+    my ($self, $indvs, $fam, $args, $pre) = @_;
+    my $count = 0;
+    my %PED;
+    my %MAP;
+    my @pdl;
+
+    my $count2 = 0;
+
+    foreach my $fkey (@{$indvs}){
+	$PED{$fkey} = [$fam, $self->{file_keys}{$fkey}, '0', '0', 'unknown', '0'];
+    }
+
+
+    my $n_indv = scalar @{$indvs};
+    my $n_alleles = 2 * $n_indv;
+
+
+    my $t = Tabix->new(-data => $self->{'file'});
+    my @features = $t->getnames();
+    foreach my $f (@features){
+	my $it = $t->query($f);
+
+    #create data structure PLINK format
+
+	my $lpos   = 0;
+
+	
+      LINE: while(my $l = $t->read($it)){
+	  $self->{line}{raw} = $l;
+	  $self->_Parse_Line();
+	  my $ref = $self->{line}{refined}{ref}[0];
+	  my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	  next LINE unless $self->{line}{refined}{type} eq 'SNV';
+	  $self->_Group($indvs);
+	  my @counts  = _Count_Genotypes($self->{line}{group_A});
+	  next LINE if $counts[0]->{genotype_counts}{nocall} > 0;
+	  next LINE unless $self->{line}{refined}{start} - $lpos > 100_000 && $lpos == 0;
+	  $lpos = $self->{line}{refined}{start};
+	  $MAP{$count2} = [$self->{line}{refined}{seqid}, "$self->{line}{refined}{seqid}:$self->{line}{refined}{start}:$self->{line}{refined}{start}", '0', $self->{line}{refined}{start}];
+	  $count2++;
+	  foreach my $indv (@{$indvs}){
+	      push @{$PED{$indv}}, (split /:/, $self->{'line'}{'genotypes'}{$indv}{genotype});
+	  }
+      }
+    }
+    
+#PRINT PED
+    open(FH, '>', "$pre.ped") || die "cannot open $pre.per for writing";
+    
+    foreach my $key (sort {$a <=> $b} keys %PED){
+	foreach my $dat (@{$PED{$key}}){
+	    print FH "$dat\t";
+	}
+	print FH "\n";
+    }
+    
+    close(FH);
+
+#PRINT MAP
+    
+    open(FH2, '>', "$pre.map") || die "cannot open $pre.map for writing";
+    
+    foreach my $m (sort {$a <=> $b} keys %MAP){
+	foreach my $dat (@{$MAP{$m}}){
+	    print FH2 "$dat\t";
+	}
+	print FH2 "\n";
+    }
+    close(FH2);
+}
+
+
 #-----------------------------------------------------------------------------   
 
 1;
