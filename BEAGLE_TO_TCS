@@ -1,0 +1,92 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+BEAGLE_TO_TCS -f phased.beagle -s scaffold -b 1 -e 10
+
+Description:
+
+This program was written to take phased BEAGLE data and output 
+
+";
+
+
+my ($help);
+my $file;
+my $scaffold;
+my $begin;
+my $end;
+my $opt_success = GetOptions('help'       => \$help,
+			     "file=s"     => \$file,
+			     "scaffold=s" => \$scaffold,
+			     "begin=s"    =>  \$begin,
+			     "end=s"      =>  \$end,
+			     );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file && $scaffold && $begin && $end;
+
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+my $count = 0;
+
+my %DATA;
+
+while (my $l = <$IN>) {
+    $count++;
+    my @line = split /\s+/, $l;
+    shift @line;
+    parse_indvs(@line) if $count == 1;    
+    next if $count == 1;   
+    my @marker = split /:/, shift @line;
+    next if $scaffold ne $marker[0];
+    next if $marker[1] < $begin;
+    last if $marker[1] > $end;
+    
+    my $allele_count = 0;
+  
+    while(@line){
+	my $Al_A = shift @line;
+	my $Al_B = shift @line;
+	push @{$DATA{$allele_count}{Haplotype_A}}, $Al_A;
+	push @{$DATA{$allele_count}{Haplotype_B}}, $Al_B;
+	$allele_count++;
+    }
+    
+}
+
+foreach my $key (sort {$a <=> $b} keys %DATA){
+    print "$key"."_HapA   ";
+    foreach my $hap (@{$DATA{$key}{Haplotype_A}}){
+	print $hap;
+    }
+
+    print "\n";
+    print "$key"."_HapB   ";
+    foreach my $hap (@{$DATA{$key}{Haplotype_B}}){
+        print $hap;
+    }
+
+    print "\n";
+}
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub parse_indvs{
+
+    my @indvs = shift;
+    shift @indvs;
+    foreach my $i (@indvs){
+	$DATA{$i}{Haplotype_A} = ();
+	$DATA{$i}{Haplotype_B} = {};
+    }
+}
