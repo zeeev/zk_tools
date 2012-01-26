@@ -1,13 +1,18 @@
 #!/usr/bin/perl
 
-use Fcntl qw(:flock);
+use threads;
+use threads::shared;
 use lib '/home/zkronenb/tools/zk_tools/';
 use CDR;
 use strict;
 use warnings;
 use Getopt::Long;
 use Data::Dumper;
-use Parallel::ForkManager;
+
+
+#flush that buffer or your threads will shit the bed on print
+
+$| = 1;
 
 #sometimes you just need a huge piddle lolz 
 $PDL::BIGPDL = 1;
@@ -19,10 +24,15 @@ my $usage = "
 
 Synopsis:
 
-cdr.t -f cdr  -t  10 (number of processors) -o output.txt
+cdr.t -f cdr  -t  10 (number of processors) -g 1,2,34,5
 
 Description:
 
+
+This scrip takes a CDR and does R^2 calculatations for a population.
+This runs in parallele and uses PDL so get ready to burn baby!  you must 
+specify the number of threads you want to use and the indviduals you want to 
+include in your calculations.  This prints to STDOUT.
 
 
 ";
@@ -31,68 +41,58 @@ Description:
 my ($help);
 my $file;
 my $n_threads;
-my $output;
+my $group;
 my $opt_success = GetOptions('help'      => \$help,
 			     "file=s"    => \$file,
-			     "output=s"  => \$output,
+			     "group=s"  => \$group,
 			     "threads=s" => \$n_threads);
 
 
 die $usage if $help || ! $opt_success;
-die $usage unless $file && $n_threads;
+die $usage unless $file && $n_threads && $group;
+
+
 my $cdr = CDR->new('file' => $file);
+my @INDVS: shared = split /,/, $group;
+my @FEATURES: shared  = @{$cdr->Get_Seqids};
+my $PRINT_FLAG: shared = 1;
 
-open(my $FH, '>', "$output.ld.txt") || die "Cannot open $output.ld.txt\n";
+#-----------------------------------------------------------------------------
+sub Run_Threads{
+    my $features = shift;
+    my $cdr = shift;
+    my @features:shared = keys %{$features};
 
-#excluding C-rup 
+    my @threads;
 
-my @indvs = (0..35,37..40);
-
-my @features = @{$cdr->Get_Seqids};
-
-while(@features){
-    my @child;
-    my @temp_features;
-    if (scalar @features > $n_threads){
-	for(my $i = 1; $i <= $n_threads; $i++){
-	    my $feature = shift @features;
-	    push @temp_features, $feature;
-	}
+    for (my $i = 1; $i <= $n_threads; $i++){
+        push @threads, threads->create(\&Do_Work($cdr));
     }
-    else{
-	for(my $i = 1; $i <= scalar @features; $i++){
-	    my $feature = shift @features;
-	    push @temp_features, $feature;
-	}
+
+    foreach (@threads){
+        $_->join;
     }
-    Fork_Threads(\@indvs, \@temp_features, $cdr, $FH);
 }
 
-close $FH;
 #-----------------------------------------------------------------------------
-#-------------------------------- SUBROUTINES --------------------------------
-#-----------------------------------------------------------------------------
+sub Do_Work{
+    my $cdr = shift;
+    while(defined $FEATURES[0]){
+	my $feature = shift @FEATURES;
+	my @print_vector = $cdr->LD(@INDVS, $feature);
 
-sub Fork_Threads{
-    my ($indvs, $f, $cdr, $FH) = @_;
-    my $pm = new Parallel::ForkManager($n_threads);
-       
-  FEATURE: foreach my $feature (@{$f}){
-      next FEATURE if ! defined $feature;
-      $pm->start and next;
-      print STDERR "INFO: Working on $feature\n";
-      my @p = $cdr->LD($indvs, $feature);
-      if(defined $p[0]){
-	  flock($FH, LOCK_EX);
-	  print $FH join "\n", @p;
-	  print $FH "\n";
-	  flock($FH, LOCK_UN);
-      }
-      $pm->finish;
-  }
-    $pm->wait_all_children;    
+	lock($PRINT_FLAG);
+	cond_wait($PRINT_FLAG) until $PRINT_FLAG == 1;
+	$PRINT_FLAG = 0;
+	print join "\n", @print_vector;
+	$PRINT_FLAG = 1; 
+    }
 }
+#-----------------------------------------------------------------------------
 
+ 
+
+    
 
 
 
