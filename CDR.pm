@@ -491,62 +491,130 @@ sub _Chi_Lookup{
 }
     
 #-----------------------------------------------------------------------------   
+sub Weir_Cockerham{
 
-sub FST{
+#the equation was taken from weir and cockerham 1984 equation (1) pg 1359
+#right now it only allows for two subpopulations since I am only doing fst
+#genome scans for two populations.  All subroutines used for this calculation
+#begin with wc_.
 
-    my ($self, $groups) = @_;
-   
+    my ($self, $groups, $scaffs) = @_;
 
-    my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
-    return if scalar (grep {!/\^/} @alleles) == 1;
+  SCAFF: foreach my $scaff (@{$scaffs}){
+      
+      my $t = Tabix->new(-data => $self->{'file'});
+      my $it = $t->query($scaff);
 
-    $self->_Group($groups);
-    my ($a_t_counts, $a_a_counts)      = _Count_Genotypes($self->{'line'}{'group_A'});
-    my ($b_t_counts, $b_a_counts)      = _Count_Genotypes($self->{'line'}{'group_B'});
-    my ($total_counts, $total_alleles) = _Count_Genotypes($self->{'line'}{'genotypes'});
-
-    my $ma = _sort_by_increasing_vals($total_alleles);
-    
-    my $n            = $total_counts->{'allele_counts'}{'called'};
-    #my $x            = $total_alleles->{$ma} / $n;
-    
-#    my $ma_a = _sort_by_increasing_vals($a_a_counts);
-#    my $ma_b = _sort_by_increasing_vals($b_a_counts);
-    
-    return if ! defined $a_t_counts->{'allele_counts'}{'called'};
-    return if ! defined $b_t_counts->{'allele_counts'}{'called'};
-
-    my $n_a = $a_t_counts->{'allele_counts'}{'called'};
-    my $n_b = $b_t_counts->{'allele_counts'}{'called'};
-
-    my $x_a = defined $a_a_counts->{$ma} ? ($a_a_counts->{$ma} / $n_a ) : 0;
-    my $x_b = defined $b_a_counts->{$ma} ? ($b_a_counts->{$ma} / $n_b ) : 0;
-   
-    my $x = ($x_a + $x_b) / 2;
-
-    my $dem = 2 * ($n / ($n - 1)) * $x * (1 - $x);
-    
-    my $main_num_a = $x_a != 0 ? 2 * $n_a/($n_a -1) * $x_a * (1 - $x_a) : 0 ;
-    my $main_num_b = $x_b != 0 ? 2 * $n_b/($n_b -1) * $x_b * (1 - $x_b) : 0 ;
-    
-    my $n_a_c2 = $n_a * ($n_a - 1)/2;
-    my $n_b_c2 = $n_b * ($n_b - 1)/2;
-    my $n_t_c2 = $n_a_c2 + $n_b_c2;
-
-    my $a_final = $n_a_c2 * $main_num_a;
-    my $b_final = $n_b_c2 * $main_num_b;
-
-    my $FST =  1 - ((($a_final + $b_final) / $n_t_c2 ) / $dem); 
-    $FST = (abs($FST) < 0.000000001) ? 0 : $FST;
-    print "$self->{'line'}{'refined'}{'seqid'}\t$self->{'line'}{'refined'}{'start'}\t$FST\n";
+      next SCAFF if ! defined $it;
+      
+    LINE: while(my $l = $t->read($it)){
+        $self->{line}{raw} = $l;
+        $self->_Parse_Line();
+	my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	next LINE if (scalar grep {!/\^/} @alleles) != 2;
+	my @gens = grep {!/\^/} @alleles;
+	
+	$self->_Group($groups);
+	my @tot          = _Count_Genotypes($self->{'line'}{'genotypes'});
+	my @g_a          = _Count_Genotypes($self->{'line'}{'group_A'});
+	my @g_b          = _Count_Genotypes($self->{'line'}{'group_B'});
+	my ($n_bar, $r)  = wc_n_bar([\@g_a, \@g_b]);
+	next LINE if $n_bar == 0;
+	my $n_c          = wc_n_c($n_bar, $r, [\@g_a, \@g_b]);
+	my $p_bar        = wc_p_bar($n_bar, $r, $alleles[0], [\@g_a, \@g_b]);
+	my $s_2          = wc_s_2($n_bar, $r, $p_bar, $alleles[0],[\@g_a, \@g_b]);
+	my $h_bar        = wc_h_bar($n_bar, $r, \@gens, [\@g_a, \@g_b]);
+	my $a            = wc_a($n_bar, $r, $n_c, $p_bar, $s_2, $h_bar);
+	my $b            = wc_b($n_bar, $p_bar, $r, $s_2, $h_bar);
+	my $c            = wc_c($h_bar);
+	my $fucking_theta_hat =  $a != 0 ? $a/($a + $b + $c) :  'NA';
+	print  "$self->{line}{refined}{seqid}\t$self->{line}{refined}{start}\t$fucking_theta_hat\n";
+    }
+  }
 }
-
 #-----------------------------------------------------------------------------   
-
+sub wc_n_bar{
+    my $grouped_counts = shift;
+    my $r = scalar @{$grouped_counts};
+    my $n_bar = 0;
+    foreach my $g (@{$grouped_counts}){
+	my $n = @{$g}[0]->{'allele_counts'}{'called'};
+	$n_bar += defined $n ?  $n / $r : 0;
+    }
+    return $n_bar, $r;
+}
+#-----------------------------------------------------------------------------   
+sub wc_n_c{
+    my ($n_bar, $r, $grouped_counts) = @_;
+    my $sum_exp = 0;
+    foreach my $g (@{$grouped_counts}){
+	$sum_exp += defined @{$g}[0]->{'allele_counts'}{'called'} ? @{$g}[0]->{'allele_counts'}{'called'}**2 / ($r*$n_bar) : 0;
+    }
+    my $nc =  ($r* $n_bar - $sum_exp)/($r - 1);
+    return $nc;
+}
+#-----------------------------------------------------------------------------   
+sub wc_p_bar{
+    my ($n_bar, $r, $allele, $grouped_counts) = @_;
+    my $p_bar = 0;
+    foreach my $g (@{$grouped_counts}){
+	$p_bar += defined @{$g}[1]->{$allele}  ? @{$g}[1]->{$allele} / ($r * $n_bar) : 0;
+    }
+    return $p_bar;
+}
+#-----------------------------------------------------------------------------   
+sub wc_s_2{
+    my ($n_bar, $r, $p_bar, $allele, $grouped_counts) = @_;
+    my $s_2 = 0;
+    foreach my $g (@{$grouped_counts}){
+	my $n = defined @{$g}[0]->{'allele_counts'}{'called'} ? @{$g}[0]->{'allele_counts'}{'called'} : 0;
+	my $p_tild = defined @{$g}[1]->{$allele} ?  @{$g}[1]->{$allele} / $n : 0;
+	$s_2 += $n != 0 ? $n*($p_tild - $p_bar)**2 / (($r -1) * $n_bar) : 0;
+    }
+    return $s_2;
+}
+#-----------------------------------------------------------------------------   
+sub wc_h_bar{
+    my ($n_bar, $r, $alleles, $grouped_counts) = @_;
+    my $h_bar = 0;
+    my $het = join ":", sort {$a cmp $b} @{$alleles};
+    foreach my $g (@{$grouped_counts}){
+	$h_bar += defined @{$g}[2]->{$het} ?  @{$g}[2]->{$het}  / ($r * $n_bar) : 0;
+    }
+    return $h_bar;
+}
+#-----------------------------------------------------------------------------   
+sub wc_a{
+    my ($n_bar, $r, $n_c, $p_bar, $s_2, $h_bar) = @_;
+    my $a = 0;
+    my $inner_most = ($p_bar * (1 - $p_bar)) - (($r - 1)/$r) * $s_2 - (1/4) * $h_bar;
+    my $inner = ($n_bar - 1) != 0 ? $s_2 - (1/($n_bar - 1)) : $s_2;
+    $a =  $n_bar != 0 && $n_c != 0 ? ($n_bar / $n_c) * $inner_most * $inner : 0 ;
+    return $a;
+}
+#-----------------------------------------------------------------------------   
+sub wc_b{
+    my ($n_bar, $p_bar, $r, $s_sq, $h_bar) = @_;
+    my $b = 0;
+    my $inner = $p_bar * (1 - $p_bar) - (($r - 1)/$r) * $s_sq - (2 * $n_bar - 1)/(4 * $n_bar) * $h_bar;
+    $b = ($n_bar - 1) != 0 && $n_bar != 0 ? ($n_bar / ($n_bar - 1)) * $inner : 0;
+    return $b;
+}
+#-----------------------------------------------------------------------------   
+sub wc_c{
+    my $h_bar= shift;
+    my $c = 0;
+    $c = 1/2*$h_bar;
+    }
+#-----------------------------------------------------------------------------   
 sub _Group{
 
+    #Groups the loci into two groups.  You can use ! to exclude an indvidual from
+    #both groups.
+    
+
     my %groupA;
-    my %groupB;
+    my %group_disgard;
 
     my %groupA_DAT;
     my %groupB_DAT;
@@ -554,16 +622,25 @@ sub _Group{
     my ($self, $groups) = @_;
     
     foreach my $i (@{$groups}){
-	$groupA{$i} = 1;
+	if($i !~ /!/){
+	    $groupA{$i} = 1; 
+	}
+	else{
+	    my @is = split /-/, $i;
+	    $group_disgard{$is[1]} = 1;
+	}
     }
     
-    while(my($indv, $indv_hash) = each %{$self->{'line'}{'genotypes'}}){
+    GROUP: while(my($indv, $indv_hash) = each %{$self->{'line'}{'genotypes'}}){
 	if (exists $groupA{$indv}){
 	    $groupA_DAT{$indv} = $indv_hash;
 	}
+	elsif(exists $group_disgard{$indv}){
+	    next GROUP;
+	}
 	else{
 	    $groupB_DAT{$indv} = $indv_hash;
-	} 
+	}
     }
     $self->{line}{group_A} = \%groupA_DAT;
     $self->{line}{group_B} = \%groupB_DAT; 
@@ -745,7 +822,7 @@ sub LD{
       my $loc_a = $piddle->PDL::slice(":,$i");
     INNER: for (my $j = 0; $j < $n_row; $j++){
 	next INNER if defined $r_data{$i}{$j};
-	next OUTER if abs($markers{$i} - $markers{$j}) >= 500000;
+	next OUTER if abs($markers{$i} - $markers{$j}) >= 100000;
 	my $loc_b = $piddle->PDL::slice(":,$j");
 #dont need this because we are not allowing for NC	
 #my ($sub_a, $sub_b) = where($loc_a, $loc_b, $loc_a < 3 & $loc_b <3);
@@ -780,75 +857,73 @@ sub fisher_yates_shuffle {
 
 #-----------------------------------------------------------------------------   
 sub Distance_Matrix{
-    my ($self, $indvs, $args) = @_;
+    my ($self, $indvs, $scaffs) = @_;
     my $count = 0;
     my %markers;
     my @pdl;
 
-    my $t = Tabix->new(-data => $self->{'file'});
-    my $it = $t->query($args);
+    print join "\t", @{$indvs};
+    print "\n";
 
-    return if ! defined $it;
+  SCAFF: foreach my $scaff (@{$scaffs}){
 
-    my $n_indv = scalar @{$indvs};
-    my $n_alleles = 2 * $n_indv;
-
-  LINE: while(my $l = $t->read($it)){
-      $self->{line}{raw} = $l;
-      $self->_Parse_Line();
-      my $ref = $self->{line}{refined}{ref}[0];
-      my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
-      next LINE unless $self->{line}{refined}{type} eq 'SNV';
-      next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
-      $self->_Group($indvs);
-      my @counts  = _Count_Genotypes($self->{line}{group_A});
-      next LINE if $counts[0]->{genotype_counts}{nocall} > 0; 
-      next LINE if ($counts[1]->{$alleles[1]} / $n_alleles) > 0.90 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.1;
-      $markers{$count} = $self->{line}{refined}{start};
-      my @vals;
-# AA = 0
-# AB = 1
-# BB = 2                                                                                                                                                                                                                                                                                        
-# ^^ = 3                                                                                                                                                                                                                                                                                                             
-    GENOTYES: foreach my $key (@{$indvs}){
-        my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
-        if($genotype[0] eq '^'){
-            push @vals, 3;
-        }
-        elsif($genotype[0] ne $ref){
-            push @vals, 2;
-        }
-        elsif($genotype[0] ne $genotype[1]){
-            push @vals, 1;
-        }
-        else{
-            push @vals, 0;
-        }
-    }
-      $pdl[$count++] = pdl @vals;
-  }
-    
-# A PDL data stucture.                                                                                                                                                                                                                                                                                                  
-    return if scalar @pdl <= 1;
-    my $piddle = pdl(@pdl);
-    
-    my @dist;
-    my @distance_matrix;
-
-    my $n_col =  $piddle->slice(':,0')->nelem;
-
-  OUTER: for (my $i = 0; $i < $n_col; $i++){
-      my $col_a = $piddle->PDL::slice("$i,:");
-    INNER: for (my $j = 0; $j < $n_col; $j++){
-        next INNER if defined $dist[$i][$j];
-        my $col_b = $piddle->PDL::slice("$j,:");  
-	my $sum = PDL::sum($col_a - $col_b);
-        $dist[$i][$j] = $sum;
+      my $t = Tabix->new(-data => $self->{'file'});
+      my $it = $t->query($scaff);
+      
+      next SCAFF if ! defined $it;
+      
+      my $n_indv = scalar @{$indvs};
+      my $n_alleles = 2 * $n_indv;
+      
+    LINE: while(my $l = $t->read($it)){
+	$self->{line}{raw} = $l;
+	$self->_Parse_Line();
+	my $ref = $self->{line}{refined}{ref}[0];
+	my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	next LINE unless $self->{line}{refined}{type} eq 'SNV';
+	next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
+	$self->_Group($indvs);
+	my @counts  = _Count_Genotypes($self->{line}{group_A});
+	next LINE if $counts[0]->{genotype_counts}{nocall} > 0; 
+	$markers{$count} = $self->{line}{refined}{start};
+	my @vals;
+	
+      GENOTYES: foreach my $key (@{$indvs}){
+	  my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
+	  if($genotype[0] ne $ref || $genotype[1] ne $ref){
+	      push @vals, '1';
+	  }
+	  else{
+	      push @vals, '0';
+	  }
+      }
+	#  $pdl[$count++] = pdl @vals;
+	print join "\t", @vals;
+	print "\n";
+#ending all loops to load data      
     }
   }
+# A PDL data stucture.           
 
-    print "test\n";
-
+#    #return if there aren't sufficent sites.
+#    return if scalar @pdl <= 1000;
+#    my $piddle = pdl(@pdl);
+#    
+#    my @dist;
+#    my @distance_matrix;
+#    
+#    my $n_col =  $piddle->slice(':,0')->nelem;
+#    
+#  OUTER: for (my $i = 0; $i < $n_col; $i++){
+#      my $col_a = $piddle->PDL::slice("$i,:");
+#    INNER: for (my $j = 0; $j < $n_col; $j++){
+#        next INNER if defined $dist[$i][$j];
+#        my $col_b = $piddle->PDL::slice("$j,:");  
+#	my $sum = PDL::sum($col_a - $col_b);
+#        $dist[$i][$j] = $sum;
+#    }
+#  }
+#    return \@dist
 }
 
 
@@ -856,7 +931,7 @@ sub Distance_Matrix{
 #-----------------------------------------------------------------------------   
 sub Print_PLINK{
 
-    my ($self, $indvs, $fam, $args, $pre) = @_;
+    my ($self, $indvs, $fam, $pre, $features) = @_;
     my $count = 0;
     my %PED;
     my %MAP;
@@ -872,32 +947,33 @@ sub Print_PLINK{
     my $n_indv = scalar @{$indvs};
     my $n_alleles = 2 * $n_indv;
 
-
     my $t = Tabix->new(-data => $self->{'file'});
-    my @features = $t->getnames();
-    foreach my $f (@features){
+    foreach my $f (@{$features}){
+	print STDERR "INFO working on: $f\n";
 	my $it = $t->query($f);
-
-    #create data structure PLINK format
-
-	my $lpos   = 0;
-
+	
+	#create data structure PLINK format
+	
+	my $lpos = 0;	
 	
       LINE: while(my $l = $t->read($it)){
 	  $self->{line}{raw} = $l;
 	  $self->_Parse_Line();
-	  my $ref = $self->{line}{refined}{ref}[0];
-	  my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	  next LINE if $self->{line}{refined}{seqid} =~ /^C/;  #contigs 
 	  next LINE unless $self->{line}{refined}{type} eq 'SNV';
-	  $self->_Group($indvs);
-	  my @counts  = _Count_Genotypes($self->{line}{group_A});
-	  next LINE if $counts[0]->{genotype_counts}{nocall} > 0;
-	  next LINE unless $self->{line}{refined}{start} - $lpos > 100_000 && $lpos == 0;
-	  $lpos = $self->{line}{refined}{start};
-	  $MAP{$count2} = [$self->{line}{refined}{seqid}, "$self->{line}{refined}{seqid}:$self->{line}{refined}{start}:$self->{line}{refined}{start}", '0', $self->{line}{refined}{start}];
-	  $count2++;
-	  foreach my $indv (@{$indvs}){
-	      push @{$PED{$indv}}, (split /:/, $self->{'line'}{'genotypes'}{$indv}{genotype});
+	  if($self->{line}{refined}{start} - $lpos > 100_000){
+	      my $ref = $self->{line}{refined}{ref}[0];
+	      $self->_Group($indvs);
+	      my @counts  = _Count_Genotypes($self->{line}{group_A});
+	      next LINE if $counts[0]->{genotype_counts}{nocall} > 0;
+	      next LINE if scalar  (grep {!/\^|$ref/} keys %{$counts[1]}) != 1;
+	      $lpos = $self->{line}{refined}{start};
+	      $MAP{$count2} = [$self->{line}{refined}{seqid}, "$self->{line}{refined}{seqid}:$self->{line}{refined}{start}:$self->{line}{refined}{start}", '0', $self->{line}{refined}{start}];
+	      $count2++;
+	      foreach my $indv (@{$indvs}){
+		  push @{$PED{$indv}}, (split /:/, $self->{'line'}{'genotypes'}{$indv}{genotype});
+	      }
+	      $lpos = $self->{line}{refined}{start};
 	  }
       }
     }
@@ -913,7 +989,7 @@ sub Print_PLINK{
     }
     
     close(FH);
-
+    
 #PRINT MAP
     
     open(FH2, '>', "$pre.map") || die "cannot open $pre.map for writing";
