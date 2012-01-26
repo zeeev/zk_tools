@@ -57,11 +57,11 @@ my @INDVS: shared = split /,/, $group;
 my @FEATURES: shared  = @{$cdr->Get_Seqids};
 my $PRINT_FLAG: shared = 1;
 
+Run_Threads($cdr);
+
 #-----------------------------------------------------------------------------
 sub Run_Threads{
-    my $features = shift;
     my $cdr = shift;
-    my @features:shared = keys %{$features};
 
     my @threads;
 
@@ -79,7 +79,7 @@ sub Do_Work{
     my $cdr = shift;
     while(defined $FEATURES[0]){
 	my $feature = shift @FEATURES;
-	my @print_vector = $cdr->LD(@INDVS, $feature);
+	my @print_vector = $cdr->LD(\@INDVS, $feature);
 
 	lock($PRINT_FLAG);
 	cond_wait($PRINT_FLAG) until $PRINT_FLAG == 1;
