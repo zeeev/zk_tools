@@ -775,10 +775,13 @@ sub LD{
       my $ref = $self->{line}{refined}{ref}[0];
       $self->_Group($indvs);
       my @counts  = _Count_Genotypes($self->{line}{group_A});
+      my @counts2 = _Count_Genotypes($self->{line}{group_B});
+
       my @alleles = sort {$a cmp $b} keys %{$counts[1]};
       
       next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
-      next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;        
+      next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;
+      next LINE if $counts2[0]->{genotype_counts}{nocall}  > 0;    
       next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.90 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.1;
       $markers{$count} = $self->{line}{refined}{start};
       
@@ -1005,6 +1008,37 @@ sub Print_PLINK{
 
 
 #-----------------------------------------------------------------------------   
+
+#This sub is designed to generate counts of nocall by groups.  Lets say you 
+#want to know if your groupsize is 10 how many loci contain at least one NC.
+#prints:
+
+#seqid group_size Y_nc_count N_nc_count 
+
+sub COUNT_NOCALL_BY_GROUP{
+    my ($self, $indvs, $args) = @_;
+    my @INDVS = fisher_yates_shuffle
+
+    my $tabix = Tabix->new(-data => $self->{'file'});
+    my $it = $tabix->query($args);
+    
+    
+    return if ! defined $it;
+    
+
+
+  LINE: while(my $l = $tabix->read($it)){
+      $self->{line}{raw} = $l;
+      $self->_Parse_Line();
+      
+      
+      
+
+  }
+
+
+
+
 
 1;
 
