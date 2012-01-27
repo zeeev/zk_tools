@@ -2,6 +2,7 @@
 
 use threads;
 use threads::shared;
+use IO::Handle;
 use lib '/home/zkronenb/tools/zk_tools/';
 use CDR;
 use strict;
@@ -52,21 +53,25 @@ die $usage if $help || ! $opt_success;
 die $usage unless $file && $n_threads && $group;
 
 
-my $cdr = CDR->new('file' => $file);
+
+
+
+my $CDR = CDR->new('file' => $file);
 my @INDVS: shared = split /,/, $group;
-my @FEATURES: shared  = @{$cdr->Get_Seqids};
+my @FEATURES: shared  = @{$CDR->Get_Seqids};
 my $PRINT_FLAG: shared = 1;
 
-Run_Threads($cdr);
+Run_Threads($CDR);
 
 #-----------------------------------------------------------------------------
 sub Run_Threads{
+
     my $cdr = shift;
 
     my @threads;
 
     for (my $i = 1; $i <= $n_threads; $i++){
-        push @threads, threads->create(\&Do_Work($cdr));
+        push @threads, threads->create(\&Do_Work, $cdr);
     }
 
     foreach (@threads){
@@ -76,16 +81,18 @@ sub Run_Threads{
 
 #-----------------------------------------------------------------------------
 sub Do_Work{
+    
     my $cdr = shift;
+    
     while(defined $FEATURES[0]){
 	my $feature = shift @FEATURES;
 	my @print_vector = $cdr->LD(\@INDVS, $feature);
-
 	lock($PRINT_FLAG);
-	cond_wait($PRINT_FLAG) until $PRINT_FLAG == 1;
-	$PRINT_FLAG = 0;
-	print join "\n", @print_vector;
-	$PRINT_FLAG = 1; 
+      
+	if(defined $print_vector[0]){
+	    print join "\n", @print_vector;
+	    print "\n";
+	}
     }
 }
 #-----------------------------------------------------------------------------

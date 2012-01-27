@@ -1031,10 +1031,10 @@ sub COUNT_NOCALL_BY_GROUP{
       $self->{line}{raw} = $l;
       $self->_Parse_Line();
       
-      
-      
-
-  }
+  }      
+    
+    
+}
 
 
 
