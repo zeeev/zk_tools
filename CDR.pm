@@ -261,30 +261,6 @@ sub Get_Seqids {
 
 #-----------------------------------------------------------------------------   
 
-sub Query_Range {
-    my ($self, $args) = @_;
-    my $t = Tabix->new(-data => $self->{'file'});
-    my $i = $t->query($args);
-    LINE: while(my $l = $t->read($i)){
-	next LINE if ! defined $l;
-	$self->{'line'}{'raw'} = $l;
-	$self->_Parse_Line;
-	next LINE if !defined $self->{'line'}{'genotypes'};
-#	my $flag = $self->_Scrub_No_Call;
-#	$flag = 0 if $self->{'line'}{'refined'}{'type'} ne 'SNV';
-#	next LINE if $flag == 0;
-#	my @group = (40, 0, 3, 31, 35, 19, 24);
-#	my @group = (1,2,3,4);
-#	$self->FST(\@group);
-       $self->HWE_Departure;	
-#	$self->_Print_Beagle();
-#	$self->_Print_MAP();
-   }
-}
-
-
-#-----------------------------------------------------------------------------   
-
 sub _Parse_Line{
     my $self = shift;
     $self->_Parse_Raw_Line;
@@ -330,14 +306,13 @@ sub _Parse_Genotype{
 
     my $self = shift;
     my %genotype;
- 
+
     for my $g (@{$self->{'line'}{'raw_genotypes'}}){
 	my @g = split /\|/, $g; 
 	my $set = Set::IntSpan::Fast->new();
         $set->add_from_string($g[0]);
-	foreach my $i ($set->as_array){
-	    print STDERR "overlapping genotypes : $self->{'line'}{'raw'}\n" if exists $genotype{$i}{'genotype'};
-	    return if exists $genotype{$i}{'genotype'};
+	INDV: foreach my $i ($set->as_array){
+	    die "overlapping genotypes : $self->{'line'}{'raw'}\n" if exists $genotype{$i}{'genotype'};
 	    $genotype{$i}{'genotype'} = join ":", sort {$a cmp $b} split /:/, $g[1];
 	    $genotype{$i}{'effect'} = $g[2];
 	}
@@ -384,6 +359,7 @@ sub _Parse_Alleles{
 sub _Count_Genotypes{
 
     my $info_hash = shift;
+  
 
     my %allele_counts;
     my %genotype_counts;
@@ -496,100 +472,145 @@ sub Weir_Cockerham{
 #the equation was taken from weir and cockerham 1984 equation (1) pg 1359
 #right now it only allows for two subpopulations since I am only doing fst
 #genome scans for two populations.  All subroutines used for this calculation
-#begin with wc_.
+#begin with wc_.  This has been mimiced after Pegas [R]'s equations.  The pigeon
+#headcrest snp has validated this stie. 
 
-    my ($self, $groups, $scaffs) = @_;
 
-  SCAFF: foreach my $scaff (@{$scaffs}){
+#library(pegas)
+#my.dat<-as.data.frame(cbind(c(rep("T/T", 8), rep("T/C",2), rep("C/C", 23)),c(rep(1, 8), rep(2,2), rep(2, 23))))
+#colnames(my.dat)<-c("genotypes", "population")
+#my.loci<-as.loci(my.dat)
+
+
+    my ($self, $groups, $scaff) = @_;
+
       
       my $t = Tabix->new(-data => $self->{'file'});
       my $it = $t->query($scaff);
 
       next SCAFF if ! defined $it;
       
+    my @DAT;
+
     LINE: while(my $l = $t->read($it)){
         $self->{line}{raw} = $l;
         $self->_Parse_Line();
-	my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
-	next LINE if (scalar grep {!/\^/} @alleles) != 2;
-	my @gens = grep {!/\^/} @alleles;
-	
 	$self->_Group($groups);
+	my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	my @gens = grep {!/\^/} @alleles;
+	next LINE if (scalar grep {!/\^/} @alleles) != 2;
 	my @tot          = _Count_Genotypes($self->{'line'}{'genotypes'});
+
+	
+	next LINE if $tot[0]->{allele_counts}{nocall} > $tot[0]->{allele_counts}{called}; 
+	
 	my @g_a          = _Count_Genotypes($self->{'line'}{'group_A'});
+	
+	next LINE if $g_a[0]->{allele_counts}{called} == 0; 
+	
 	my @g_b          = _Count_Genotypes($self->{'line'}{'group_B'});
+	
+	next LINE if $g_b[0]->{allele_counts}{called} == 0;
+
 	my ($n_bar, $r)  = wc_n_bar([\@g_a, \@g_b]);
+
+	my $N = $n_bar*$r;
+
 	next LINE if $n_bar == 0;
-	my $n_c          = wc_n_c($n_bar, $r, [\@g_a, \@g_b]);
-	my $p_bar        = wc_p_bar($n_bar, $r, $alleles[0], [\@g_a, \@g_b]);
-	my $s_2          = wc_s_2($n_bar, $r, $p_bar, $alleles[0],[\@g_a, \@g_b]);
-	my $h_bar        = wc_h_bar($n_bar, $r, \@gens, [\@g_a, \@g_b]);
-	my $a            = wc_a($n_bar, $r, $n_c, $p_bar, $s_2, $h_bar);
-	my $b            = wc_b($n_bar, $p_bar, $r, $s_2, $h_bar);
+
+	my $n_c          = wc_n_c($N, $r, [\@g_a, \@g_b]);
+	my $p_bar        = wc_p_bar($N, \@gens, [\@g_a, \@g_b]);
+	my $s_2          = wc_s_2($n_bar, $r, $p_bar, \@gens,[\@g_a, \@g_b]);
+	my $h_bar        = wc_h_bar($N, \@gens, [\@g_a, \@g_b]);
+	my $a            = wc_a($n_bar, $r, $n_c, @{$p_bar}[0], @{$s_2}[0], $h_bar);
+	my $b            = wc_b($n_bar, @{$p_bar}[0], $r, @{$s_2}[0], $h_bar);
 	my $c            = wc_c($h_bar);
-	my $fucking_theta_hat =  $a != 0 ? $a/($a + $b + $c) :  'NA';
-	print  "$self->{line}{refined}{seqid}\t$self->{line}{refined}{start}\t$fucking_theta_hat\n";
+	my $fit =  1 - ($c/($a + $b + $c));
+	my $fst =  $a != 0 ? $a/($a + $b + $c) : 'NA';
+	my $fis =  1 - ($c/($b + $c));
+	push @DAT,  "$self->{line}{refined}{seqid}\t$self->{line}{refined}{start}\t$fit\t$fst\t$fis";
     }
+    return \@DAT;
   }
-}
+
 #-----------------------------------------------------------------------------   
+#This may be a wonky way to do it.  But it allows for multiple groups.
+
 sub wc_n_bar{
     my $grouped_counts = shift;
     my $r = scalar @{$grouped_counts};
     my $n_bar = 0;
     foreach my $g (@{$grouped_counts}){
-	my $n = @{$g}[0]->{'allele_counts'}{'called'};
+	my $n = @{$g}[0]->{'genotype_counts'}{'called'};
 	$n_bar += defined $n ?  $n / $r : 0;
     }
     return $n_bar, $r;
 }
 #-----------------------------------------------------------------------------   
 sub wc_n_c{
-    my ($n_bar, $r, $grouped_counts) = @_;
+    my ($N, $r, $grouped_counts) = @_;
     my $sum_exp = 0;
     foreach my $g (@{$grouped_counts}){
-	$sum_exp += defined @{$g}[0]->{'allele_counts'}{'called'} ? @{$g}[0]->{'allele_counts'}{'called'}**2 / ($r*$n_bar) : 0;
+	$sum_exp += (@{$g}[0]->{'genotype_counts'}{'called'}**2 / $N);
     }
-    my $nc =  ($r* $n_bar - $sum_exp)/($r - 1);
+    my $nc =  ($N - $sum_exp)/($r - 1);
     return $nc;
 }
 #-----------------------------------------------------------------------------   
 sub wc_p_bar{
-    my ($n_bar, $r, $allele, $grouped_counts) = @_;
-    my $p_bar = 0;
-    foreach my $g (@{$grouped_counts}){
-	$p_bar += defined @{$g}[1]->{$allele}  ? @{$g}[1]->{$allele} / ($r * $n_bar) : 0;
+    
+    #you are summing across alleles NOT groups FML.
+    
+    my ($N, $alleles, $grouped_counts) = @_;
+    my @p_bars = ();
+    foreach my $a (@{$alleles}){
+	my $p_bar = 0;
+	foreach my $g (@{$grouped_counts}){
+	    my $ptild = defined @{$g}[1]->{$a} ? @{$g}[1]->{$a} / @{$g}[0]->{allele_counts}{called} : 0;  
+	    $p_bar   += defined @{$g}[0]->{genotype_counts}{called} && $ptild ? @{$g}[0]->{genotype_counts}{called} * $ptild / $N : 0;  
+	}				      
+	push @p_bars, $p_bar;
     }
-    return $p_bar;
+    return \@p_bars;
 }
 #-----------------------------------------------------------------------------   
 sub wc_s_2{
-    my ($n_bar, $r, $p_bar, $allele, $grouped_counts) = @_;
-    my $s_2 = 0;
-    foreach my $g (@{$grouped_counts}){
-	my $n = defined @{$g}[0]->{'allele_counts'}{'called'} ? @{$g}[0]->{'allele_counts'}{'called'} : 0;
-	my $p_tild = defined @{$g}[1]->{$allele} ?  @{$g}[1]->{$allele} / $n : 0;
-	$s_2 += $n != 0 ? $n*($p_tild - $p_bar)**2 / (($r -1) * $n_bar) : 0;
+    my ($n_bar, $r, $p_bar, $alleles, $grouped_counts) = @_;
+    my @s_2s = ();
+    my $dem = ($r - 1) * $n_bar;
+    
+    my $count=0;
+    foreach my $a (@{$alleles}){
+	my $s_2 = 0;
+	foreach my $g (@{$grouped_counts}){
+	    my $n = defined @{$g}[0]->{'allele_counts'}{'called'} ? @{$g}[0]->{'allele_counts'}{'called'} : 0;
+	    my $p_tild = defined @{$g}[1]->{$a} ?  @{$g}[1]->{$a} / $n : 0;
+	    $s_2 += $n != 0 ? ((@{$g}[0]->{'genotype_counts'}{'called'} *($p_tild - @{$p_bar}[$count])**2) / $dem) : 0;
+	}
+	$count++;
+	push @s_2s, $s_2;
     }
-    return $s_2;
+    return \@s_2s;
 }
 #-----------------------------------------------------------------------------   
 sub wc_h_bar{
-    my ($n_bar, $r, $alleles, $grouped_counts) = @_;
+    my ($N, $alleles, $grouped_counts) = @_;
     my $h_bar = 0;
     my $het = join ":", sort {$a cmp $b} @{$alleles};
+    
     foreach my $g (@{$grouped_counts}){
-	$h_bar += defined @{$g}[2]->{$het} ?  @{$g}[2]->{$het}  / ($r * $n_bar) : 0;
+	$h_bar += defined @{$g}[2]->{$het} && $N > 0 ?  @{$g}[2]->{$het}  / $N : 0;
     }
     return $h_bar;
 }
 #-----------------------------------------------------------------------------   
 sub wc_a{
     my ($n_bar, $r, $n_c, $p_bar, $s_2, $h_bar) = @_;
-    my $a = 0;
-    my $inner_most = ($p_bar * (1 - $p_bar)) - (($r - 1)/$r) * $s_2 - (1/4) * $h_bar;
-    my $inner = ($n_bar - 1) != 0 ? $s_2 - (1/($n_bar - 1)) : $s_2;
-    $a =  $n_bar != 0 && $n_c != 0 ? ($n_bar / $n_c) * $inner_most * $inner : 0 ;
+    my $a = 0; 
+    my $A = $p_bar * (1 - $p_bar) - ($r - 1) * ($s_2/$r);
+    if ($A ne 0 && $p_bar ne 0 && $s_2 ne 0 && $h_bar ne 0 && $n_c ne 0){
+	$a = $n_bar * ($s_2 - ($A - $h_bar/4)/($n_bar - 1))/$n_c;
+    }
     return $a;
 }
 #-----------------------------------------------------------------------------   
@@ -610,7 +631,8 @@ sub wc_c{
 sub _Group{
 
     #Groups the loci into two groups.  You can use ! to exclude an indvidual from
-    #both groups.
+    #both groups.  If !-10 for example 10 will be removed from all the genotypes
+    #including $self->{line}{genotypes}.  Total exclusion. 
     
 
     my %groupA;
@@ -642,6 +664,11 @@ sub _Group{
 	    $groupB_DAT{$indv} = $indv_hash;
 	}
     }
+
+    foreach my $key (keys %group_disgard){
+	delete $self->{line}{genotypes}{$key};
+    }
+    
     $self->{line}{group_A} = \%groupA_DAT;
     $self->{line}{group_B} = \%groupB_DAT; 
 }
@@ -782,7 +809,7 @@ sub LD{
       next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
       next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;
       next LINE if $counts2[0]->{genotype_counts}{nocall}  > 0;    
-      next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.90 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.1;
+      next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.95 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.05;
       $markers{$count} = $self->{line}{refined}{start};
       
       my @vals;
@@ -795,10 +822,6 @@ sub LD{
     GENOTYES: foreach my $key (@{$indvs}){
 	my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
 	
-#dont need this for nocall	
-#if($genotype[0] eq '^'){
-#    push @vals, 3;
-#}
 	if($genotype[0] ne $ref && $genotype[1] ne $ref){
 	    push @vals, 2;
 	}
@@ -817,7 +840,6 @@ sub LD{
     return if scalar @pdl <= 1; 
     my $piddle = pdl(@pdl);
     
-    
     my %r_data;
     my $n_row =  $piddle->slice('0,:')->nelem;
     
@@ -827,9 +849,6 @@ sub LD{
 	next INNER if defined $r_data{$i}{$j};
 	next OUTER if abs($markers{$i} - $markers{$j}) >= 100000;
 	my $loc_b = $piddle->PDL::slice(":,$j");
-#dont need this because we are not allowing for NC	
-#my ($sub_a, $sub_b) = where($loc_a, $loc_b, $loc_a < 3 & $loc_b <3);
-#	my $cor =  $sub_a->corr($sub_b)->at;
 	my $cor =  $loc_a->corr($loc_b)->at(0);
 	$r_data{$i}{$j} = $cor**2;
     }
@@ -1039,12 +1058,116 @@ sub cout_nocall_by_group_size{
   }      
 }
 
+#-----------------------------------------------------------------------------   
+
+sub Gillespie_Weighted_FST{
+    
+    my ($self, $groups, $scaffs) = @_;
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $it = $t->query($scaffs);
+
+    my @dat;
+    
+  LINE: while(my $l = $t->read($it)){
+	$self->{line}{raw} = $l;
+	$self->_Parse_Line();
+	$self->_Group($groups);
+	my @alleles = grep {!/\^/} @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	next LINE if (scalar @alleles) != 2;
+	
+	my @tot          = _Count_Genotypes($self->{'line'}{'genotypes'});
+	my @g_a          = _Count_Genotypes($self->{'line'}{'group_A'});
+	my @g_b          = _Count_Genotypes($self->{'line'}{'group_B'});
+		
+	my $group_sums = sum_heterozygosity(\@tot, \@g_a, \@g_b, $alleles[0], 1);
+	my $total_sum  = sum_heterozygosity(\@tot, \@tot, $alleles[0], 0);
+	my $fst = ($total_sum - $group_sums) / $total_sum;
+	push @dat,"$self->{line}{refined}{seqid}\t$self->{line}{refined}{start}\t$fst";
+    }       
+    return @dat;
+}
 
 
-
-
+<<<<<<< HEAD
 
 
 1;
+=======
+#-----------------------------------------------------------------------------   
+>>>>>>> 2c57089900aa9f7c2face17e218c0e32c3e37630
 
+sub sum_heterozygosity{
 
+    my @groups = @_;
+    my $tot = shift @groups;
+    my $flag = pop @groups;
+    my $allele = pop @groups;
+    my $weight = 1;
+   
+    my $sum = 0; 
+    
+    foreach my $g (@groups){
+	$weight = defined @{$g}[0]->{allele_counts}{called} ? @{$g}[0]->{allele_counts}{called} / @{$tot}[0]->{allele_counts}{called} : 0 if $flag == 1; 
+	my $p = defined @{$g}[1]->{$allele} ?  @{$g}[1]->{$allele} / @{$g}[0]->{allele_counts}{called} : 0;
+	my $q = (1 - $p);
+	$sum += $p > 0 && $q > 0 ? $weight*2*$p*$q : 0;
+    }
+    return $sum;
+} 
+
+#-----------------------------------------------------------------------------   
+
+#This this script takes the entire cdr and loads up all indviduals as a single
+#string that contains binary data for rapid intersections to measure deminishing
+#returns.  This is some very heavy lifting.
+#
+#
+#
+#
+#sub Gillespie_Weighted_FST{
+#    
+#    use Bit::Vector;
+#    
+#    my %DATA_STUCT;
+#    
+#    my ($self, $groups, $scaffs) = @_;
+#    my $t = Tabix->new(-data => $self->{'file'});
+#    
+#    SCAFF: foreach my $f (@{$features}){
+#        print STDERR "INFO working on: $f\n";
+#        my $it = $t->query($f);
+#	
+#      LINE: while(my $l = $t->read($it)){
+#	  $self->{line}{raw} = $l;
+#	  $self->_Parse_Line();
+#	  my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})}
+#	  $self->_load_bit(\%DATA_STRUCT, \@alleles);
+#      }
+#    }  
+#}
+#
+#-----------------------------------------------------------------------------   
+# This looks through all the alleles at the loci and creates a binary vector for 
+# each indv and loads it into the data structure.
+#
+#sub _load_bit{
+#
+#    my ($self, $DAT, $alleles);
+#    
+#    while( my($info, $value) = each %{$self->{line}{genotypes}}){
+#        while(my($key, $value_2) = each %{$value}){
+#            if ($key =~ /genotype/){
+#                my @gen = split /:/, $value_2;
+#                map {$allele_counts{$_}++} @gen;
+#                $genotype_counts{$value_2}++;
+#            }
+#        }
+#    }
+#
+#
+#
+#
+#}
+#-----------------------------------------------------------------------------   
+
+1;
