@@ -1035,25 +1035,28 @@ sub Print_PLINK{
 
 #seqid group_size Y_nc_count N_nc_count 
 
-sub COUNT_NOCALL_BY_GROUP{
+sub cout_nocall_by_group_size{
     my ($self, $indvs, $args) = @_;
-    my @INDVS = fisher_yates_shuffle
-
     my $tabix = Tabix->new(-data => $self->{'file'});
     my $it = $tabix->query($args);
-    
-    
     return if ! defined $it;
-    
-
-
   LINE: while(my $l = $tabix->read($it)){
       $self->{line}{raw} = $l;
       $self->_Parse_Line();
-      
+      for(my $i = 1; $i < scalar(@{$indvs}); $i++){
+	  my @tmp_indvs = @{$indvs};
+	  fisher_yates_shuffle(\@tmp_indvs);
+	  my @temp_group;
+	  for(my $j = 1; $j <= $i; $j++){
+	      push @temp_group, shift @tmp_indvs;
+	  }
+	  
+	  $self->_Group(\@temp_group);
+	  my @counts  = _Count_Genotypes($self->{'line'}{'group_A'});
+	  my $res = $counts[2]->{'^:^'} > 0 ? 1 : 0;  
+	  print "$i\t$res\n";
+      }
   }      
-    
-    
 }
 
 #-----------------------------------------------------------------------------   
@@ -1087,6 +1090,7 @@ sub Gillespie_Weighted_FST{
 
 
 #-----------------------------------------------------------------------------   
+
 
 sub sum_heterozygosity{
 
