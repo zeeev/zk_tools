@@ -378,6 +378,11 @@ sub _Count_Genotypes{
     }
     
     my %total;
+
+    $total{'allele_counts'}{'nocall'} = 0;
+    $total{'allele_counts'}{'called'} = 0;
+    $total{'genotype_counts'}{'called'} = 0;
+    $total{'genotype_counts'}{'nocall'} = 0;
     
     while( my ($key, $value) = each %genotype_counts){
 	$total{'genotype_counts'}{'nocall'} += $value if $key =~ /\^/;
@@ -500,23 +505,18 @@ sub Weir_Cockerham{
 	my @gens = grep {!/\^/} @alleles;
 	next LINE if (scalar grep {!/\^/} @alleles) != 2;
 	my @tot          = _Count_Genotypes($self->{'line'}{'genotypes'});
-
-	
-	next LINE if $tot[0]->{allele_counts}{nocall} > $tot[0]->{allele_counts}{called}; 
-	
+	next LINE if $tot[0]->{allele_counts}{nocall} > $tot[0]->{allele_counts}{called};
 	my @g_a          = _Count_Genotypes($self->{'line'}{'group_A'});
-	
-	next LINE if $g_a[0]->{allele_counts}{called} == 0; 
+	print STDERR Dumper(@g_a) if ! defined $g_a[0]->{allele_counts}{called};
+	next LINE if $g_a[0]->{allele_counts}{called} == 0; 	
 	
 	my @g_b          = _Count_Genotypes($self->{'line'}{'group_B'});
-	
 	next LINE if $g_b[0]->{allele_counts}{called} == 0;
-
 	my ($n_bar, $r)  = wc_n_bar([\@g_a, \@g_b]);
 
 	my $N = $n_bar*$r;
 
-	next LINE if $n_bar == 0;
+	next LINE if $N == 0;
 
 	my $n_c          = wc_n_c($N, $r, [\@g_a, \@g_b]);
 	my $p_bar        = wc_p_bar($N, \@gens, [\@g_a, \@g_b]);
@@ -525,8 +525,11 @@ sub Weir_Cockerham{
 	my $a            = wc_a($n_bar, $r, $n_c, @{$p_bar}[0], @{$s_2}[0], $h_bar);
 	my $b            = wc_b($n_bar, @{$p_bar}[0], $r, @{$s_2}[0], $h_bar);
 	my $c            = wc_c($h_bar);
+
+	next LINE if $a == 0 || $c == 0;
+
 	my $fit =  1 - ($c/($a + $b + $c));
-	my $fst =  $a != 0 ? $a/($a + $b + $c) : 'NA';
+	my $fst =  $a/($a + $b + $c);
 	my $fis =  1 - ($c/($b + $c));
 	push @DAT,  "$self->{line}{refined}{seqid}\t$self->{line}{refined}{start}\t$fit\t$fst\t$fis";
     }
@@ -542,7 +545,7 @@ sub wc_n_bar{
     my $n_bar = 0;
     foreach my $g (@{$grouped_counts}){
 	my $n = @{$g}[0]->{'genotype_counts'}{'called'};
-	$n_bar += defined $n ?  $n / $r : 0;
+	$n_bar += $n / $r;
     }
     return $n_bar, $r;
 }
@@ -566,8 +569,10 @@ sub wc_p_bar{
     foreach my $a (@{$alleles}){
 	my $p_bar = 0;
 	foreach my $g (@{$grouped_counts}){
-	    my $ptild = defined @{$g}[1]->{$a} ? @{$g}[1]->{$a} / @{$g}[0]->{allele_counts}{called} : 0;  
-	    $p_bar   += defined @{$g}[0]->{genotype_counts}{called} && $ptild ? @{$g}[0]->{genotype_counts}{called} * $ptild / $N : 0;  
+	    if(defined @{$g}[1]->{$a}){
+		my $ptild = @{$g}[1]->{$a} / @{$g}[0]->{allele_counts}{called};
+		$p_bar   += @{$g}[0]->{genotype_counts}{called} * $ptild / $N;  
+	    }
 	}				      
 	push @p_bars, $p_bar;
     }
@@ -599,7 +604,7 @@ sub wc_h_bar{
     my $het = join ":", sort {$a cmp $b} @{$alleles};
     
     foreach my $g (@{$grouped_counts}){
-	$h_bar += defined @{$g}[2]->{$het} && $N > 0 ?  @{$g}[2]->{$het}  / $N : 0;
+	$h_bar += defined @{$g}[2]->{$het} ?  @{$g}[2]->{$het}  / $N : 0;
     }
     return $h_bar;
 }
@@ -608,9 +613,7 @@ sub wc_a{
     my ($n_bar, $r, $n_c, $p_bar, $s_2, $h_bar) = @_;
     my $a = 0; 
     my $A = $p_bar * (1 - $p_bar) - ($r - 1) * ($s_2/$r);
-    if ($A ne 0 && $p_bar ne 0 && $s_2 ne 0 && $h_bar ne 0 && $n_c ne 0){
-	$a = $n_bar * ($s_2 - ($A - $h_bar/4)/($n_bar - 1))/$n_c;
-    }
+    $a = $n_bar * ($s_2 - ($A - $h_bar/4)/($n_bar - 1))/$n_c;
     return $a;
 }
 #-----------------------------------------------------------------------------   
@@ -618,7 +621,7 @@ sub wc_b{
     my ($n_bar, $p_bar, $r, $s_sq, $h_bar) = @_;
     my $b = 0;
     my $inner = $p_bar * (1 - $p_bar) - (($r - 1)/$r) * $s_sq - (2 * $n_bar - 1)/(4 * $n_bar) * $h_bar;
-    $b = ($n_bar - 1) != 0 && $n_bar != 0 ? ($n_bar / ($n_bar - 1)) * $inner : 0;
+    $b = ($n_bar / ($n_bar - 1)) * $inner;
     return $b;
 }
 #-----------------------------------------------------------------------------   
@@ -787,7 +790,7 @@ sub LD{
     my $tabix = Tabix->new(-data => $self->{'file'});
     my $it = $tabix->query($args);
     
-    
+  
     return if ! defined $it;
     
     my $n_indv = scalar @{$indvs};
@@ -814,24 +817,22 @@ sub LD{
       
       my @vals;
       
-# AA = 0
-# AB = 1 
-# BB = 2
-# ^^ = 3
+# AA = 1
+# AB = 2 
+# BB = 3
       
+      my @non_ref = grep {!/$ref|\^/} @alleles;
+      
+      my $hets = "$alleles[0]:$alleles[1]";
+      my $homr = "$ref:$ref";
+      my $homn = "$non_ref[0]:$non_ref[0]";
+
     GENOTYES: foreach my $key (@{$indvs}){
-	my @genotype = split /:/, $self->{line}{genotypes}{$key}{genotype};
-	
-	if($genotype[0] ne $ref && $genotype[1] ne $ref){
-	    push @vals, 2;
-	}
-	if($genotype[0] ne $genotype[1]){
-	    push @vals, 1;
-	}
-	else{
-	    push @vals, 0;
-	}
+	push @vals, 1 if $self->{line}{genotypes}{$key}{genotype} eq $homr;
+	push @vals, 2 if $self->{line}{genotypes}{$key}{genotype} eq $hets;
+	push @vals, 3 if $self->{line}{genotypes}{$key}{genotype} eq $homn;
     }
+      
       $pdl[$count++] = pdl @vals;    
   }
     
@@ -1160,5 +1161,116 @@ sub sum_heterozygosity{
 #
 #}
 #-----------------------------------------------------------------------------   
+sub LINKER{
+    my ($self, $indvs, $args) = @_;
+    my $count = 0;
+    my %markers;
+    my @pdl; 
+    my %BFH;
+    
+  SEQ: foreach my $seq (@{$args}){
+      
+      my $tabix = Tabix->new(-data => $self->{'file'});
+      
+      my @iters;
+      
+      push @iters, $tabix->query($seq, 0, 10000);
+      push @iters, $tabix->query($seq, 246662, 256662);
+      
+      my $start_end = 0;  
+
+    START_END: foreach my $it (@iters){ 
+	my $n_indv = scalar @{$indvs};
+	my $n_alleles = 2 * $n_indv;
+	my @pos;
+      LINE: while(my $l = $tabix->read($it)){
+	  
+	  $self->{line}{raw} = $l;
+	  $self->_Parse_Line();
+	  
+	  next LINE unless $self->{line}{refined}{type} eq 'SNV';
+	  
+	  my $ref = $self->{line}{refined}{ref}[0];
+	  $self->_Group($indvs);
+	  my @counts  = _Count_Genotypes($self->{line}{group_A});
+	  my @counts2 = _Count_Genotypes($self->{line}{group_B});
+	  
+	  my @alleles = sort {$a cmp $b} keys %{$counts[1]};
+	  
+	  next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
+	  next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;
+	  next LINE if $counts2[0]->{genotype_counts}{nocall}  > 0;
+	  next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.95 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.05;
+	  $markers{$count} = $self->{line}{refined}{start};
+	  
+	  my @vals;
+
+	
+	  my @non_ref = grep {!/$ref|\^/} @alleles;
+
+	  my $hets = "$alleles[0]:$alleles[1]";
+	  my $homr = "$ref:$ref";
+	  my $homn = "$non_ref[0]:$non_ref[0]";
+
+	GENOTYES: foreach my $key (@{$indvs}){
+	    push @vals, 1 if $self->{line}{genotypes}{$key}{genotype} eq $homr;
+	    push @vals, 2 if $self->{line}{genotypes}{$key}{genotype} eq $hets;
+	    push @vals, 3 if $self->{line}{genotypes}{$key}{genotype} eq $homn;
+	}
+
+	  next LINE if ! defined @vals[0];
+	  push @pos,  \@vals;
+      }
+	$start_end++;	
+	$BFH{$seq}{$start_end} = pdl @pos;
+    }    
+  }
+
+    my @keys = (1,2);
+
+    foreach my $seq1 (sort {$a cmp $b} keys %BFH){
+	foreach my $n1 (@keys){
+	    my $pdla = $BFH{$seq1}{$n1};
+	    foreach my $seq2 (sort {$a cmp $b} keys %BFH){
+		foreach my $n2 (@keys){
+		    my $pdlb = $BFH{$seq2}{$n2};
+		
+		    my ($s1, $offA) = split /_/, $seq1;
+		    my ($s2, $offB) = split /_/, $seq2;
+
+		    my $n_rowa =  $pdla->slice('0,:')->nelem;
+		    my $n_rowb =  $pdlb->slice('0,:')->nelem;
+
+		    my $total;
+		    my $sum;
+		    
+		    my %r_data;
+
+
+		  OUTER: for (my $i = 0; $i < $n_rowa; $i++){
+		      my $loc_a = $pdla->PDL::slice(":,$i");
+		      next OUTER if $n_rowa == 1;
+		      next OUTER if $n_rowb == 1;
+		    INNER: for (my $j = 0; $j < $n_rowb; $j++){
+			next INNER if defined $r_data{$i}{$j};
+			my $loc_b = $pdlb->PDL::slice(":,$j");
+			my $cor =  $loc_a->corr($loc_b)->at(0);
+			$r_data{$i}{$j} = 1;
+			$sum++ if $cor > 0.5; 
+			$total++;
+		    }
+		  }
+		    my $p = $sum / $total;
+		    
+		    print "$offA\t$offB\t$p\t$total\t$n1\t$n2\n";
+		}
+	    }
+	}
+    }   
+}
+
+
+
+
 
 1;
