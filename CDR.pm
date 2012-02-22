@@ -1178,9 +1178,9 @@ sub LINKER{
       
       my @iters;
       
-      push @iters, $tabix->query($seq, 0, 10000);
-      push @iters, $tabix->query($seq, 246662, 256662);
-      
+      push @iters, $tabix->query($seq, 0, 100000);
+      push @iters, $tabix->query($seq, 2400000, 2600000);
+
       my $start_end = 0;  
 
     START_END: foreach my $it (@iters){ 
@@ -1208,8 +1208,6 @@ sub LINKER{
 	  $markers{$count} = $self->{line}{refined}{start};
 	  
 	  my @vals;
-
-	
 	  my @non_ref = grep {!/$ref|\^/} @alleles;
 
 	  my $hets = "$alleles[0]:$alleles[1]";
@@ -1232,49 +1230,50 @@ sub LINKER{
 
     my @keys = (1,2);
 
-    foreach my $seq1 (sort {$a cmp $b} keys %BFH){
-	foreach my $n1 (@keys){
-	    my $pdla = $BFH{$seq1}{$n1};
-	    foreach my $seq2 (sort {$a cmp $b} keys %BFH){
-		foreach my $n2 (@keys){
-		    my $pdlb = $BFH{$seq2}{$n2};
+    my %no_repeat;
+    
+  FIRST_SEQ: foreach my $seq1 (sort {$a cmp $b} keys %BFH){
+      F_E1: foreach my $n1 (@keys){
+	  my $pdla = $BFH{$seq1}{$n1};
+	SECOND_SEQ: foreach my $seq2 (sort {$a cmp $b} keys %BFH){
+	    next SECOND_SEQ if $seq1 eq $seq2;
+	    F_E2: foreach my $n2 (@keys){
 		
-		    my ($s1, $offA) = split /_/, $seq1;
-		    my ($s2, $offB) = split /_/, $seq2;
+		my $pdlb = $BFH{$seq2}{$n2};
+		my ($s1, $offA) = split /_/, $seq1;
+		my ($s2, $offB) = split /_/, $seq2;
 
-		    my $n_rowa =  $pdla->slice('0,:')->nelem;
-		    my $n_rowb =  $pdlb->slice('0,:')->nelem;
+		next SECOND_SEQ if $no_repeat{$seq1}{$seq2}{$n1}{$n2} == 1;
+		
+		$no_repeat{$seq1}{$seq2}{$n1}{$n2} = 1;
+		$no_repeat{$seq2}{$seq1}{$n1}{$n2} = 1;
+		
+		my $n_rowa =  $pdla->slice('0,:')->nelem;
+		my $n_rowb =  $pdlb->slice('0,:')->nelem;
+		
+		my $total = 0;
+		my $sum = 0;
 
-		    my $total;
-		    my $sum;
-		    
-		    my %r_data;
-
-
-		  OUTER: for (my $i = 0; $i < $n_rowa; $i++){
-		      my $loc_a = $pdla->PDL::slice(":,$i");
-		      next OUTER if $n_rowa == 1;
-		      next OUTER if $n_rowb == 1;
-		    INNER: for (my $j = 0; $j < $n_rowb; $j++){
-			next INNER if defined $r_data{$i}{$j};
-			my $loc_b = $pdlb->PDL::slice(":,$j");
-			my $cor =  $loc_a->corr($loc_b)->at(0);
-			$r_data{$i}{$j} = 1;
-			$sum++ if $cor > 0.5; 
-			$total++;
-		    }
-		  }
-		    my $p = $sum / $total;
-		    
-		    print "$offA\t$offB\t$p\t$total\t$n1\t$n2\n";
+		my %r_data;
+				
+	      OUTER: for (my $i = 0; $i < $n_rowa; $i++){
+		  my $loc_a = $pdla->PDL::slice(":,$i");
+		  next OUTER if $n_rowa == 1;
+		  next OUTER if $n_rowb == 1;
+		INNER: for (my $j = 0; $j < $n_rowb; $j++){
+		    next INNER if defined $r_data{$i}{$j};
+		    my $loc_b = $pdlb->PDL::slice(":,$j");
+		    my $cor =  $loc_a->corr($loc_b)->at(0);
+		    $r_data{$i}{$j} = 1;
+		    $sum++ if $cor**2 > 0.20; 
+		    $total++;
 		}
+	      }
+		print "$offA\t$offB\t$sum\t$total\t$n1\t$n2\n";
 	    }
 	}
-    }   
+      }
+  }   
 }
-
-
-
-
 
 1;
