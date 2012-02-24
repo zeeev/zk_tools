@@ -848,7 +848,7 @@ sub LD{
       my $loc_a = $piddle->PDL::slice(":,$i");
     INNER: for (my $j = 0; $j < $n_row; $j++){
 	next INNER if defined $r_data{$i}{$j};
-	next OUTER if abs($markers{$i} - $markers{$j}) >= 100000;
+	next OUTER if abs($markers{$i} - $markers{$j}) >= 5_000_000;
 	my $loc_b = $piddle->PDL::slice(":,$j");
 	my $cor =  $loc_a->corr($loc_b)->at(0);
 	$r_data{$i}{$j} = $cor**2;
@@ -1090,8 +1090,6 @@ sub Gillespie_Weighted_FST{
 
 
 #-----------------------------------------------------------------------------   
-
-
 sub sum_heterozygosity{
 
     my @groups = @_;
@@ -1112,15 +1110,12 @@ sub sum_heterozygosity{
 } 
 
 #-----------------------------------------------------------------------------   
-
-#This this script takes the entire cdr and loads up all indviduals as a single
-#string that contains binary data for rapid intersections to measure deminishing
-#returns.  This is some very heavy lifting.
 #
+##This this script takes the entire cdr and loads up all indviduals as a single
+##string that contains binary data for rapid intersections to measure deminishing
+##returns.  This is some very heavy lifting.
 #
-#
-#
-#sub Gillespie_Weighted_FST{
+#sub RETURN{
 #    
 #    use Bit::Vector;
 #    
@@ -1129,40 +1124,45 @@ sub sum_heterozygosity{
 #    my ($self, $groups, $scaffs) = @_;
 #    my $t = Tabix->new(-data => $self->{'file'});
 #    
-#    SCAFF: foreach my $f (@{$features}){
-#        print STDERR "INFO working on: $f\n";
-#        my $it = $t->query($f);
-#	
-#      LINE: while(my $l = $t->read($it)){
+#  SCAFF: foreach my $f (@{$features}){
+#      print STDERR "INFO working on: $f\n";
+#      my $it = $t->query($f);
+#      
+#    LINE: while(my $l = $t->read($it)){
 #	  $self->{line}{raw} = $l;
 #	  $self->_Parse_Line();
-#	  my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})}
-#	  $self->_load_bit(\%DATA_STRUCT, \@alleles);
+#	  $self->_load_bit();
 #      }
-#    }  
+#  }  
 #}
 #
-#-----------------------------------------------------------------------------   
-# This looks through all the alleles at the loci and creates a binary vector for 
-# each indv and loads it into the data structure.
+##-----------------------------------------------------------------------------   
+## This looks through all the alleles at the loci and creates a binary vector for 
+## each indv and loads it into the data structure.
 #
 #sub _load_bit{
 #
-#    my ($self, $DAT, $alleles);
+#    my $self = shift;
 #    
-#    while( my($info, $value) = each %{$self->{line}{genotypes}}){
-#        while(my($key, $value_2) = each %{$value}){
-#            if ($key =~ /genotype/){
+#    my @alleles = grep {!/@{$self->{line}{refined}{ref}}[0]|\^/} @{_Parse_Alleles($self->{'line'}{'genotypes'})}
+#    
+#    my %Allele_lookup;
+#    $allele_lookup{$_} = 0 for @alleles;  
+#
+#    OUTER: while( my($info, $value) = each %{$self->{line}{genotypes}}){
+#        %cp_lookup = $allele_lookup;
+#	INDV: while(my($key, $value_2) = each %{$value}){
+#	    if ($key =~ /genotype/){
 #                my @gen = split /:/, $value_2;
-#                map {$allele_counts{$_}++} @gen;
-#                $genotype_counts{$value_2}++;
+#		$cp_lookup{$_}++ for @gen;
 #            }
 #        }
+#	
+#	my @loci_bit;
+#	foreach my $a_key (sort {$a cmp $b} keys %cp_lookup){
+#	    push @loci_bit, $cp_lookup{$a_key};
+#	}
 #    }
-#
-#
-#
-#
 #}
 #-----------------------------------------------------------------------------   
 sub LINKER{
@@ -1274,6 +1274,48 @@ sub LINKER{
 	}
       }
   }   
+}
+
+#-----------------------------------------------------------------------------   
+# To generate basic statistics about files.
+# Primarly counting
+
+
+sub COUNT{
+    my ($self, $args) = @_;
+    
+    my %COUNT_DATA; #=(
+		    #'total_non_ref_alleles' => 0,
+		    #'total_nocall'          => 0
+		    #);
+    
+    my $tabix = Tabix->new(-data => $self->{'file'});
+    
+  SEQ: foreach my $seq (@{$args}){
+      my $it = $tabix->query($seq);
+    LINE: while(my $l = $tabix->read($it)){
+	$self->{line}{raw} = $l;
+	$self->_Parse_Line();
+	my $ref = $self->{line}{refined}{ref}[0];
+	INDV: foreach my $k (keys %{$self->{line}{genotypes}}){
+	    my @gen = split /:/, $self->{line}{genotypes}{$k}{genotype};
+	    if($gen[0] eq '^'){
+		$COUNT_DATA{total_nocall}{$self->{line}{refined}{type}}++;
+		$COUNT_DATA{total_nocall}{$self->{line}{refined}{type}}++;
+		$COUNT_DATA{$k}{nocall}++;
+		$COUNT_DATA{$k}{nocall}++;
+		next INDV;
+	    }
+	  GENOTYPE: foreach my $g (@gen){
+	      if($g ne $ref){
+		  $COUNT_DATA{$k}{non_ref_alleles}{$self->{line}{refined}{type}}++; 
+		  $COUNT_DATA{total_non_ref_alleles}{$self->{line}{refined}{type}}++;
+	      }
+	  }
+	} 
+    }
+  }
+    print Dumper %COUNT_DATA;
 }
 
 1;
