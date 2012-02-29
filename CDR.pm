@@ -9,6 +9,7 @@ use Math::CDF;
 use Set::IntSpan::Fast;
 use List::MoreUtils qw(uniq);
 use Math::BigFloat;
+use Bit::Vector;
 
 
 #-----------------------------------------------------------------------------
@@ -480,7 +481,6 @@ sub Weir_Cockerham{
 #begin with wc_.  This has been mimiced after Pegas [R]'s equations.  The pigeon
 #headcrest snp has validated this stie. 
 
-
 #library(pegas)
 #my.dat<-as.data.frame(cbind(c(rep("T/T", 8), rep("T/C",2), rep("C/C", 23)),c(rep(1, 8), rep(2,2), rep(2, 23))))
 #colnames(my.dat)<-c("genotypes", "population")
@@ -488,7 +488,6 @@ sub Weir_Cockerham{
 
 
     my ($self, $groups, $scaff) = @_;
-
       
       my $t = Tabix->new(-data => $self->{'file'});
       my $it = $t->query($scaff);
@@ -1115,13 +1114,15 @@ sub sum_heterozygosity{
 #string that contains binary data for rapid intersections to measure deminishing
 #returns.  This is some very heavy lifting.
 
-sub RETURN{
+sub RETURN_BIT_HASH{
     
-    use Bit::Vector;
-    
-    my %DATA_STUCT;
-    
-    my ($self, $groups, $scaffs) = @_;
+    my ($self, $scaffs) = @_;
+        
+    $self->{bit}{SNV}{$_} = () for keys %{$self->{file_keys}};
+    $self->{bit}{insertion}{$_} = () for keys %{$self->{file_keys}};
+    $self->{bit}{deletion}{$_} = () for keys %{$self->{file_keys}};
+
+
     my $t = Tabix->new(-data => $self->{'file'});
     
   SCAFF: foreach my $f (@{$scaffs}){
@@ -1134,6 +1135,9 @@ sub RETURN{
 	  $self->_load_bit();
       }
   }  
+    my $vect_data = $self->vectorize_data();
+    return $vect_data;
+
 }
 
 #-----------------------------------------------------------------------------   
@@ -1153,13 +1157,33 @@ sub _load_bit{
   OUTER: while( my($key, $value) = each %{$self->{line}{genotypes}}){
       my %cp_lookup = %allele_lookup;  
       my @gen = split /:/, $self->{line}{genotypes}{$key}{genotype};
-      $cp_lookup{$_}++ for @gen;
+      $cp_lookup{$_} =1 for @gen;
         
       my @loci_bit;
     ALLELE: foreach my $a (@alleles){
 	push @loci_bit, $cp_lookup{$a};   
     }
+      push @{$self->{bit}{$self->{line}{refined}{type}}{$key}}, @loci_bit;
   }
+}
+#-----------------------------------------------------------------------------   
+#bit vector is used to return the 
+
+sub vectorize_data{
+
+    my $self = shift;
+
+    my %DATA_STRUCT;
+
+    while(my($type, $indv_hash) = each %{$self->{bit}}){
+	foreach my $indv (keys %{$self->{bit}{$type}}){
+	    my $bits = scalar @{$self->{bit}{$type}{$indv}};
+	    my $vector = Bit::Vector->new($bits);
+	    $vector->from_Bin(join "", @{$self->{bit}{$type}{$indv}});
+	    $DATA_STRUCT{$type}{$indv} = $vector;
+	}
+    }
+    return \%DATA_STRUCT;
 }
 #-----------------------------------------------------------------------------   
 sub LINKER{
@@ -1276,15 +1300,12 @@ sub LINKER{
 #-----------------------------------------------------------------------------   
 # To generate basic statistics about files.
 # Primarly counting
-
-
 sub COUNT{
+    use Data::Tabular::Dumper;
+    
     my ($self, $args) = @_;
     
-    my %COUNT_DATA; #=(
-		    #'total_non_ref_alleles' => 0,
-		    #'total_nocall'          => 0
-		    #);
+    my %COUNT_DAT;
     
     my $tabix = Tabix->new(-data => $self->{'file'});
     
@@ -1297,22 +1318,132 @@ sub COUNT{
 	INDV: foreach my $k (keys %{$self->{line}{genotypes}}){
 	    my @gen = split /:/, $self->{line}{genotypes}{$k}{genotype};
 	    if($gen[0] eq '^'){
-		$COUNT_DATA{total_nocall}{$self->{line}{refined}{type}}++;
-		$COUNT_DATA{total_nocall}{$self->{line}{refined}{type}}++;
-		$COUNT_DATA{$k}{nocall}++;
-		$COUNT_DATA{$k}{nocall}++;
+		$COUNT_DAT{total}{nocall_allele}{$self->{line}{refined}{type}}++;
+		$COUNT_DAT{total}{nocall_allele}{$self->{line}{refined}{type}}++;
+		$COUNT_DAT{total}{nocall_site}{$self->{line}{refined}{type}}++;
+		$COUNT_DAT{$k}{nocall_allele}{$self->{line}{refined}{type}}++;
+		$COUNT_DAT{$k}{nocall_allele}{$self->{line}{refined}{type}}++;
+		$COUNT_DAT{$k}{nocall_site}{$self->{line}{refined}{type}}++;
 		next INDV;
 	    }
+	    
+	    my $non_ref_flag = 0;
 	  GENOTYPE: foreach my $g (@gen){
 	      if($g ne $ref){
-		  $COUNT_DATA{$k}{non_ref_alleles}{$self->{line}{refined}{type}}++; 
-		  $COUNT_DATA{total_non_ref_alleles}{$self->{line}{refined}{type}}++;
+		  $non_ref_flag = 1;
+		  $COUNT_DAT{$k}{non_ref_alleles}{$self->{line}{refined}{type}}++; 
+		  $COUNT_DAT{total}{non_ref_alleles}{$self->{line}{refined}{type}}++;
 	      }
 	  }
+	    $COUNT_DAT{$k}{non_ref_site}{$self->{line}{refined}{type}}++ if $non_ref_flag == 1;
+	    $COUNT_DAT{total}{non_ref_site}{$self->{line}{refined}{type}}++ if $non_ref_flag == 1;
+	    if($gen[0] ne $gen[1]){
+		$COUNT_DAT{$k}{hets}{$self->{line}{refined}{type}}++;
+		$COUNT_DAT{total}{hets}{$self->{line}{refined}{type}}++;
+	    }
+	    $non_ref_flag = 0;
 	} 
     }
   }
-    print Dumper %COUNT_DATA;
+    foreach my $key1 (keys %COUNT_DAT){
+	foreach my $key2 (keys %{$COUNT_DAT{$key1}}){
+	    foreach my $key3 (keys %{$COUNT_DAT{$key1}{$key2}}){
+		my $val = $COUNT_DAT{$key1}{$key2}{$key3};
+		print "$key1\t$key2\t$key3\t$val\n";
+	    }
+	}	
+    }
 }
 
+#-----------------------------------------------------------------------------   
+# per loci tajima's d.  The supportive subroutines are labled with a _TD
+sub Tajimas_D{
+
+    my ($self, $groups, $scaff) = @_;
+
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $it = $t->query($scaff);
+
+    next SCAFF if ! defined $it;
+
+    my @DAT;
+
+  LINE: while(my $l = $t->read($it)){
+      $self->{line}{raw} = $l;
+      $self->_Parse_Line();
+      $self->_Group($groups);
+      my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+      my @gens = grep {!/\^/} @alleles;
+      next LINE if (scalar grep {!/\^/} @alleles) != 2;
+  }
+}
+#-----------------------------------------------------------------------------   
+sub A_1_2_TD{
+    my $n_hap = shift;
+
+    my $a1 = 0;
+    my $a2 = 0;
+    for(my $i = 1; $i <= ($n_hap -1); $i++){
+	$a1 += (1 / $i);
+	$a2 += (1 / $i**2);
+    }
+    return ($a1, $a2);
+}
+#-----------------------------------------------------------------------------   
+sub B_1_2_TD{
+    my $n_hap = shift;
+
+    my $b1 = ($n_hap + 1) / (3*($n_hap - 1));
+    my $b2 = (2*($n_hap**2 + $n_hap + 3))/(9*$n_hap*($n_hap -1));
+    return $b1, $b2;
+}
+#-----------------------------------------------------------------------------   
+sub C_1_2_TD{
+    my ($a1, $a2, $b1, $b2, $n_hap) = @_;
+   
+    my $c1 = $b1 - (1 / $a1);
+    my $c2 = $b2 - (($n_hap + 2)/($a1*$n_hap)) + ($a2/$a1**2);
+    return $c1, $c2;
+}
+#-----------------------------------------------------------------------------   
+sub E_1_2_TD{
+    my ($a1, $a2, $c1, $c2) = @_;
+    
+    my $e1 = $c1/$a1;
+    my $e2 = $c2/($a1**2+$a2);
+    return $e1, $e2;
+}
+#-----------------------------------------------------------------------------   
+sub K_hat_TD{
+
+
+}
+
+#-----------------------------------------------------------------------------
+
+sub COAL_T{
+
+my ($self, $groups, $scaff) = @_;
+my $t = Tabix->new(-data => $self->{'file'});
+my $it = $t->query($scaff);
+
+next SCAFF if ! defined $it;
+
+my @DAT;
+
+ LINE: while(my $l = $t->read($it)){
+     $self->{line}{raw} = $l;
+     $self->_Parse_Line();
+     $self->_Group($groups);
+     my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+     my @gens = grep {!/\^/} @alleles;
+     next LINE if (scalar grep {!/\^/} @alleles) != 2;
+     my @tot          = _Count_Genotypes($self->{'line'}{'genotypes'});
+     next LINE if $tot[0]->{allele_counts}{nocall} > $tot[0]->{allele_counts}{called};
+     my @g_a          = _Count_Genotypes($self->{'line'}{'group_A'});
+
+ }
+}
+
+#-----------------------------------------------------------------------------   
 1;
