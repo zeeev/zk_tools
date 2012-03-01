@@ -1135,6 +1135,9 @@ sub RETURN_BIT_HASH{
 	  $self->_load_bit();
       }
   }  
+
+    print STDERR "INFO building vectors\n";
+
     my $vect_data = $self->vectorize_data();
     return $vect_data;
 
@@ -1181,6 +1184,7 @@ sub vectorize_data{
 	    my $vector = Bit::Vector->new($bits);
 	    $vector->from_Bin(join "", @{$self->{bit}{$type}{$indv}});
 	    $DATA_STRUCT{$type}{$indv} = $vector;
+	    delete $self->{bit}{SNV}{$indv};
 	}
     }
     return \%DATA_STRUCT;
