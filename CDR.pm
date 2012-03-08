@@ -360,7 +360,6 @@ sub _Count_Genotypes{
 
     my $info_hash = shift;
   
-
     my %allele_counts;
     my %genotype_counts;
     
@@ -1117,9 +1116,9 @@ sub RETURN_BIT_HASH{
     
     my ($self, $indvs, $scaffs) = @_;
         
-    $self->{bit}{SNV}{$_} = '0'       for @{$indvs};
-    $self->{bit}{insertion}{$_} = '0' for @{$indvs};
-    $self->{bit}{deletion}{$_} = '0'  for @{$indvs};
+    $self->{bit}{SNV}{$_} = ()       for @{$indvs};
+    $self->{bit}{insertion}{$_} = () for @{$indvs};
+    $self->{bit}{deletion}{$_} = ()  for @{$indvs};
 
 
     my $t = Tabix->new(-data => $self->{'file'});
@@ -1129,48 +1128,59 @@ sub RETURN_BIT_HASH{
       my $it = $t->query($f);
       
     LINE: while(my $l = $t->read($it)){
-	  $self->{line}{raw} = $l;
-	  $self->_Parse_Line();
-	  $self->_Group($indvs);
-	  my @alleles =  grep {!/@{$self->{line}{refined}{ref}}[0]|\^/} @{_Parse_Alleles($self->{line}{group_A})};
-	  next LINE if !defined $alleles[0];
-	  $self->_load_bit(\@alleles);
+	$self->{line}{raw} = $l;
+	$self->_Parse_Line();
+	$self->_Group($indvs);
+	my @alleles =  grep {!/@{$self->{line}{refined}{ref}}[0]|\^/} @{_Parse_Alleles($self->{line}{group_A})};
+	next LINE if !defined $alleles[0];
+	my $type = $self->{line}{refined}{type};
+
+	my %lookup;
+	$lookup{$_} = 0 for @alleles;
+	
+      OUTER: while( my($key, $value) = each %{$self->{line}{group_A}}){
+	  my %cp_lookup = %lookup;
+	  $cp_lookup{$_} = 1 for split /:/, $self->{line}{group_A}{$key}{genotype};
+	  
+	ALLELE: foreach my $a (@alleles){
+	    push @{$self->{bit}{$type}{$key}}, $cp_lookup{$a};
+	}
       }
-  }  
-
+    }
+  }
     print STDERR "INFO building vectors\n";
-
+    
     my $vect_data = $self->vectorize_data();
-    return $vect_data;
-
+    return $vect_data;     
 }
-
 #-----------------------------------------------------------------------------   
 # This looks through all the alleles at the loci and creates a binary vector for 
 # each indv and loads it into the data structure.
 
 sub _load_bit{
-
+    
     my ($self,$alleles)  = @_;
     
     #non reference alleles
-
+    
+    
+    my $type = $self->{line}{refined}{type};
     my @as =  @{$alleles};
-
+    my %lookup;
+    
+    
+    $lookup{$_} = 0 for @as;
+    
   OUTER: while( my($key, $value) = each %{$self->{line}{group_A}}){
-      my %cp_lookup;  
+      my %cp_lookup = %lookup;  
       $cp_lookup{$_} = 1 for split /:/, $self->{line}{group_A}{$key}{genotype};
-
+      
     ALLELE: foreach my $a (@as){
-	if(! defined $cp_lookup{$a}){
-	    $self->{bit}{$self->{line}{refined}{type}}{$key} = $self->{bit}{$self->{line}{refined}{type}}{$key}.'0';
-	}
-	else{
-	    $self->{bit}{$self->{line}{refined}{type}}{$key} = $self->{bit}{$self->{line}{refined}{type}}{$key}.$cp_lookup{$a};
-	}
-    }   
-  }
+	push @{$self->{bit}{$type}{$key}}, $cp_lookup{$a};
+    }
+  }   
 }
+
 #-----------------------------------------------------------------------------   
 #bit vector is used to return the 
 
@@ -1184,7 +1194,7 @@ sub vectorize_data{
 	foreach my $indv (keys %{$self->{bit}{$type}}){
 	    my $bits = length $self->{bit}{$type}{$indv};
 	    my $vector = Bit::Vector->new($bits);
-	    $vector->from_Bin($self->{bit}{$type}{$indv});
+	    $vector->from_Bin(join "", @{$self->{bit}{$type}{$indv}});
 	    $DATA_STRUCT{$type}{$indv} = $vector;
 	    delete $self->{bit}{$type}{$indv};
 	}
@@ -1309,10 +1319,8 @@ sub LINKER{
 sub COUNT{
     use Data::Tabular::Dumper;
     
-    my ($self, $args) = @_;
-    
+    my ($self, $args) = @_; 
     my %COUNT_DAT;
-    
     my $tabix = Tabix->new(-data => $self->{'file'});
     
   SEQ: foreach my $seq (@{$args}){
@@ -1320,46 +1328,41 @@ sub COUNT{
     LINE: while(my $l = $tabix->read($it)){
 	$self->{line}{raw} = $l;
 	$self->_Parse_Line();
-	my $ref = $self->{line}{refined}{ref}[0];
-	INDV: foreach my $k (keys %{$self->{line}{genotypes}}){
-	    my @gen = split /:/, $self->{line}{genotypes}{$k}{genotype};
-	    if($gen[0] eq '^'){
-		$COUNT_DAT{total}{nocall_allele}{$self->{line}{refined}{type}}++;
-		$COUNT_DAT{total}{nocall_allele}{$self->{line}{refined}{type}}++;
-		$COUNT_DAT{total}{nocall_site}{$self->{line}{refined}{type}}++;
-		$COUNT_DAT{$k}{nocall_allele}{$self->{line}{refined}{type}}++;
-		$COUNT_DAT{$k}{nocall_allele}{$self->{line}{refined}{type}}++;
-		$COUNT_DAT{$k}{nocall_site}{$self->{line}{refined}{type}}++;
-		next INDV;
-	    }
-	    
-	    my $non_ref_flag = 0;
-	  GENOTYPE: foreach my $g (@gen){
+	my $ref = @{$self->{line}{refined}{ref}}[0];
+	my $type = $self->{line}{refined}{type};
+      INDV: foreach my $k (keys %{$self->{line}{genotypes}}){
+	  my @gen = split /:/, $self->{line}{genotypes}{$k}{genotype};
+	  if($gen[0] ne $gen[1]){
+	      $COUNT_DAT{$k}{het_site}{$type}++;
+	      $COUNT_DAT{total}{het_site}{$type}++;
+	  }
+	  foreach my $g (@gen){
+	      if ($g eq '^'){
+		  $COUNT_DAT{$k}{nocall_site}{$type}++;
+		  $COUNT_DAT{total}{nocall_site}{$type}++;
+		  next INDV;
+	      }
 	      if($g ne $ref){
-		  $non_ref_flag = 1;
-		  $COUNT_DAT{$k}{non_ref_alleles}{$self->{line}{refined}{type}}++; 
-		  $COUNT_DAT{total}{non_ref_alleles}{$self->{line}{refined}{type}}++;
+		  $COUNT_DAT{$k}{non_ref_site}{$type}++;
+		  $COUNT_DAT{total}{non_ref_site}{$type}++;
+		  next INDV;
 	      }
 	  }
-	    $COUNT_DAT{$k}{non_ref_site}{$self->{line}{refined}{type}}++ if $non_ref_flag == 1;
-	    $COUNT_DAT{total}{non_ref_site}{$self->{line}{refined}{type}}++ if $non_ref_flag == 1;
-	    if($gen[0] ne $gen[1]){
-		$COUNT_DAT{$k}{hets}{$self->{line}{refined}{type}}++;
-		$COUNT_DAT{total}{hets}{$self->{line}{refined}{type}}++;
-	    }
-	    $non_ref_flag = 0;
-	} 
+      }
     }
   }
-    foreach my $key1 (keys %COUNT_DAT){
-	foreach my $key2 (keys %{$COUNT_DAT{$key1}}){
-	    foreach my $key3 (keys %{$COUNT_DAT{$key1}{$key2}}){
-		my $val = $COUNT_DAT{$key1}{$key2}{$key3};
-		print "$key1\t$key2\t$key3\t$val\n";
+
+    while(my($k1, $sh1) = each %COUNT_DAT){
+	while(my($k2, $sh2) = each %{$COUNT_DAT{$k1}}){
+	    foreach my $k3 (keys %{$COUNT_DAT{$k1}{$k2}}){
+		my $val = $COUNT_DAT{$k1}{$k2}{$k3};
+		print "$k1\t$k2\t$k3\t$val\n";
 	    }
-	}	
+	}
     }
-}
+
+}    
+
 
 #-----------------------------------------------------------------------------   
 # per loci tajima's d.  The supportive subroutines are labled with a _TD
@@ -1456,10 +1459,10 @@ my @DAT;
 
 sub get_tag_from_string {
     my $item = shift;
-
+    
     my @tags;
     return \@tags unless defined $item;
-
+    
     my @contiguous = split /,/, $item;
     foreach my $one (@contiguous) {
 	my ($a, $b) = split /-/, $one;
