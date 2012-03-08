@@ -809,7 +809,7 @@ sub LD{
       next LINE if scalar (grep {!/\^|$ref/} @alleles) != 1;
       next LINE if $counts[0]->{genotype_counts}{nocall}  > 0;
       next LINE if $counts2[0]->{genotype_counts}{nocall}  > 0;    
-      next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.95 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.05;
+      next LINE if ($counts[1]->{$alleles[0]} / $n_alleles) > 0.70 || ($counts[1]->{$alleles[0]} / $n_alleles) < 0.30;
       $markers{$count} = $self->{line}{refined}{start};
       
       my @vals;
@@ -845,7 +845,7 @@ sub LD{
       my $loc_a = $piddle->PDL::slice(":,$i");
     INNER: for (my $j = 0; $j < $n_row; $j++){
 	next INNER if defined $r_data{$i}{$j};
-	next OUTER if abs($markers{$i} - $markers{$j}) >= 5_000_000;
+	next OUTER if abs($markers{$i} - $markers{$j}) >= 1_000_000;
 	my $loc_b = $piddle->PDL::slice(":,$j");
 	my $cor =  $loc_a->corr($loc_b)->at(0);
 	$r_data{$i}{$j} = $cor**2;
@@ -1132,7 +1132,7 @@ sub RETURN_BIT_HASH{
 	$self->_Parse_Line();
 	$self->_Group($indvs);
 	my @alleles =  grep {!/@{$self->{line}{refined}{ref}}[0]|\^/} @{_Parse_Alleles($self->{line}{group_A})};
-	next LINE if !defined $alleles[0];
+	next LINE if ! defined $alleles[0];
 	my $type = $self->{line}{refined}{type};
 
 	my %lookup;
@@ -1149,40 +1149,11 @@ sub RETURN_BIT_HASH{
     }
   }
     print STDERR "INFO building vectors\n";
-    
     my $vect_data = $self->vectorize_data();
     return $vect_data;     
 }
 #-----------------------------------------------------------------------------   
-# This looks through all the alleles at the loci and creates a binary vector for 
-# each indv and loads it into the data structure.
-
-sub _load_bit{
-    
-    my ($self,$alleles)  = @_;
-    
-    #non reference alleles
-    
-    
-    my $type = $self->{line}{refined}{type};
-    my @as =  @{$alleles};
-    my %lookup;
-    
-    
-    $lookup{$_} = 0 for @as;
-    
-  OUTER: while( my($key, $value) = each %{$self->{line}{group_A}}){
-      my %cp_lookup = %lookup;  
-      $cp_lookup{$_} = 1 for split /:/, $self->{line}{group_A}{$key}{genotype};
-      
-    ALLELE: foreach my $a (@as){
-	push @{$self->{bit}{$type}{$key}}, $cp_lookup{$a};
-    }
-  }   
-}
-
-#-----------------------------------------------------------------------------   
-#bit vector is used to return the 
+#This call Bit::Vector, vectorizes the data and returns the data structure
 
 sub vectorize_data{
 
@@ -1192,7 +1163,7 @@ sub vectorize_data{
 
     while(my($type, $indv_hash) = each %{$self->{bit}}){
 	foreach my $indv (keys %{$self->{bit}{$type}}){
-	    my $bits = length $self->{bit}{$type}{$indv};
+	    my $bits = scalar @{$self->{bit}{$type}{$indv}};
 	    my $vector = Bit::Vector->new($bits);
 	    $vector->from_Bin(join "", @{$self->{bit}{$type}{$indv}});
 	    $DATA_STRUCT{$type}{$indv} = $vector;
