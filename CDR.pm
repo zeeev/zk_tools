@@ -6,7 +6,7 @@ use Data::Dumper;
 use PDL;
 use PDL::Stats::Basic;
 use Math::CDF;
-use Set::IntSpan::Fast;
+use Set::IntSpan::Fast::XS;
 use List::MoreUtils qw(uniq);
 use Math::BigFloat;
 use Bit::Vector;
@@ -265,8 +265,8 @@ sub Get_Seqids {
 sub _Parse_Line{
     my $self = shift;
     $self->_Parse_Raw_Line;
-    $self->_Parse_Genotype;
     $self->_Parse_Reference_Genotypes;
+    $self->_Parse_Genotype;
 }
 
 #-----------------------------------------------------------------------------   
@@ -310,51 +310,50 @@ sub _Parse_Genotype{
 
     for my $g (@{$self->{'line'}{'raw_genotypes'}}){
 	my @g = split /\|/, $g; 
-	my $set = Set::IntSpan::Fast->new();
-        $set->add_from_string($g[0]);
-	INDV: foreach my $i ($set->as_array){
-	    die "overlapping genotypes : $self->{'line'}{'raw'}\n" if exists $genotype{$i}{'genotype'};
-	    $genotype{$i}{'genotype'} = join ":", sort {$a cmp $b} split /:/, $g[1];
-	    $genotype{$i}{'effect'} = $g[2];
+
+	my @indvs = @{get_tag_from_string($g[0])};
+
+	INDV: foreach my $i (@indvs){
+#	    die "overlapping genotypes : $self->{'line'}{'raw'}\n" if exists $genotype{$i}{'genotype'};
+	    $self->{line}{genotypes}{$i}{'genotype'} = $g[1];
+	    $self->{line}{genotypes}{$i}{'effect'}   = $g[2];
 	}
     }
-    $self->{'line'}{'genotypes'} = \%genotype;
 }
 
 #-----------------------------------------------------------------------------   
 sub _Parse_Reference_Genotypes{
-   
+    
     my $self  = shift;
-    while(my($key, $file) = each %{$self->{'file_keys'}}){
-	if(! defined $self->{'line'}{'genotypes'}{$key}){
+    if (defined $self->{'line'}{'refined'}{'ref'}[1]){
+	
+	while(my($key, $file) = each %{$self->{'file_keys'}}){
 	    $self->{'line'}{'genotypes'}{$key}{'genotype'}  = "$self->{'line'}{'refined'}{'ref'}[0]:$self->{'line'}{'refined'}{'ref'}[0]";
-	    if (defined $self->{'line'}{'refined'}{'ref'}[1]){
-		$self->{'line'}{'genotypes'}{$key}{'effect'}  = "$self->{'line'}{'refined'}{'ref'}[1]:$self->{'line'}{'refined'}{'ref'}[1]";	
-	    }
-	    else{
-		$self->{'line'}{'genotypes'}{$key}{'effect'}  = undef;
-	    }
+	    $self->{'line'}{'genotypes'}{$key}{'effect'}  = "$self->{'line'}{'refined'}{'ref'}[1]:$self->{'line'}{'refined'}{'ref'}[1]";	
+	}
+    }
+    else{
+	while(my($key, $file) = each %{$self->{'file_keys'}}){
+            $self->{'line'}{'genotypes'}{$key}{'genotype'}  = "$self->{'line'}{'refined'}{'ref'}[0]:$self->{'line'}{'refined'}{'ref'}[0]";
+            $self->{'line'}{'genotypes'}{$key}{'effect'}  = undef;
 	}
     }
 }
+
     
 #-----------------------------------------------------------------------------   
-
 sub _Parse_Alleles{
 
     my $genotypes = shift;
-    my @genotypes;
-
+    my %genotype_dat;
+    
     while(my ($indv, $g) = each %{$genotypes}){
-	while(my ($info, $d) = each %{$g}){
-	    push @genotypes, split /:/, $d if $info eq 'genotype';
-	}
+	map {$genotype_dat{$_}++} split /:/, $g->{genotype};
     }
-
-    my @uniq = sort {$a cmp $b} uniq @genotypes;
-    return \@uniq;
+    
+    my @alleles = keys %genotype_dat;
+    return \@alleles;
 }
-
 #-----------------------------------------------------------------------------   
 
 sub _Count_Genotypes{
@@ -1116,11 +1115,11 @@ sub sum_heterozygosity{
 
 sub RETURN_BIT_HASH{
     
-    my ($self, $scaffs) = @_;
+    my ($self, $indvs, $scaffs) = @_;
         
-    $self->{bit}{SNV}{$_} = () for keys %{$self->{file_keys}};
-    $self->{bit}{insertion}{$_} = () for keys %{$self->{file_keys}};
-    $self->{bit}{deletion}{$_} = () for keys %{$self->{file_keys}};
+    $self->{bit}{SNV}{$_} = '0'       for @{$indvs};
+    $self->{bit}{insertion}{$_} = '0' for @{$indvs};
+    $self->{bit}{deletion}{$_} = '0'  for @{$indvs};
 
 
     my $t = Tabix->new(-data => $self->{'file'});
@@ -1132,7 +1131,10 @@ sub RETURN_BIT_HASH{
     LINE: while(my $l = $t->read($it)){
 	  $self->{line}{raw} = $l;
 	  $self->_Parse_Line();
-	  $self->_load_bit();
+	  $self->_Group($indvs);
+	  my @alleles =  grep {!/@{$self->{line}{refined}{ref}}[0]|\^/} @{_Parse_Alleles($self->{line}{group_A})};
+	  next LINE if !defined $alleles[0];
+	  $self->_load_bit(\@alleles);
       }
   }  
 
@@ -1149,24 +1151,24 @@ sub RETURN_BIT_HASH{
 
 sub _load_bit{
 
-    my $self = shift;
+    my ($self,$alleles)  = @_;
     
-    my @alleles =  @{_Parse_Alleles($self->{'line'}{'genotypes'})};
-    my @scrubbed_alleles = grep {!/\^/} @alleles;
+    #non reference alleles
 
-    my %allele_lookup;
-    $allele_lookup{$_} = 0 for @alleles;  
-    
-  OUTER: while( my($key, $value) = each %{$self->{line}{genotypes}}){
-      my %cp_lookup = %allele_lookup;  
-      my @gen = split /:/, $self->{line}{genotypes}{$key}{genotype};
-      $cp_lookup{$_} =1 for @gen;
-        
-      my @loci_bit;
-    ALLELE: foreach my $a (@alleles){
-	push @loci_bit, $cp_lookup{$a};   
-    }
-      push @{$self->{bit}{$self->{line}{refined}{type}}{$key}}, @loci_bit;
+    my @as =  @{$alleles};
+
+  OUTER: while( my($key, $value) = each %{$self->{line}{group_A}}){
+      my %cp_lookup;  
+      $cp_lookup{$_} = 1 for split /:/, $self->{line}{group_A}{$key}{genotype};
+
+    ALLELE: foreach my $a (@as){
+	if(! defined $cp_lookup{$a}){
+	    $self->{bit}{$self->{line}{refined}{type}}{$key} = $self->{bit}{$self->{line}{refined}{type}}{$key}.'0';
+	}
+	else{
+	    $self->{bit}{$self->{line}{refined}{type}}{$key} = $self->{bit}{$self->{line}{refined}{type}}{$key}.$cp_lookup{$a};
+	}
+    }   
   }
 }
 #-----------------------------------------------------------------------------   
@@ -1180,11 +1182,11 @@ sub vectorize_data{
 
     while(my($type, $indv_hash) = each %{$self->{bit}}){
 	foreach my $indv (keys %{$self->{bit}{$type}}){
-	    my $bits = scalar @{$self->{bit}{$type}{$indv}};
+	    my $bits = length $self->{bit}{$type}{$indv};
 	    my $vector = Bit::Vector->new($bits);
-	    $vector->from_Bin(join "", @{$self->{bit}{$type}{$indv}});
+	    $vector->from_Bin($self->{bit}{$type}{$indv});
 	    $DATA_STRUCT{$type}{$indv} = $vector;
-	    delete $self->{bit}{SNV}{$indv};
+	    delete $self->{bit}{$type}{$indv};
 	}
     }
     return \%DATA_STRUCT;
@@ -1450,4 +1452,27 @@ my @DAT;
 }
 
 #-----------------------------------------------------------------------------   
+# Taken from Hao in VAAST
+
+sub get_tag_from_string {
+    my $item = shift;
+
+    my @tags;
+    return \@tags unless defined $item;
+
+    my @contiguous = split /,/, $item;
+    foreach my $one (@contiguous) {
+	my ($a, $b) = split /-/, $one;
+	if (defined $b) {
+	    for (my $i = $a; $i<=$b; $i++) {
+		push @tags, $i;
+	    }
+	}
+	else {  push @tags, $a; }
+    }
+
+    return \@tags;
+}
+
+
 1;

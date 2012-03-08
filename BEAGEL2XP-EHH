@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Set::IntSpan::Fast;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+BEAGLE_TO_TCS -f phased.beagle -group 1,2,3 -FHN1 filehandle.target.txt -FHN2 background.txt
+
+Description:
+
+This program was written to take phased BEAGLE data and outputs xpehh input files
+-g is for the target group and will return the background group seperately.  
+
+
+
+";
+
+
+my ($help);
+my $file;
+my $group;
+my $FH_N1;
+my $FH_N2;
+my $opt_success = GetOptions('help'       => \$help,
+			     "file=s"     => \$file,
+			     "group=s"   => \$group,
+			     "FHN1=s"     => \$FH_N1,
+			     "FHN2=s"     => \$FH_N2,
+			     );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file && $FH_N1 && $FH_N2;
+
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+my $count = 0;
+
+my %DATA;
+my @GROUP = split /,/, $group;
+
+LINE: while (my $l = <$IN>) {
+    chomp $l;
+    $count++;
+    my @line = split /\s+/, $l;
+    shift @line;
+    parse_indvs(@line) if $count == 1;    
+    next if $count == 1;   
+    my @marker = split /:/, shift @line;
+
+    
+    next LINE if scalar(grep {!/\^/} split //, $marker[3]) ne 2; 
+    
+    print STDERR join "-", @marker;
+    print STDERR " $marker[1] $marker[1] ";
+    print STDERR join ' ', sort {$a cmp $b} grep {!/\^/} split //, $marker[3];
+    print STDERR "\n";
+    
+    my $allele_count = 0;
+  
+    while(@line){
+	my $Al_A = shift @line;
+	my $Al_B = shift @line;
+
+	my $A_dat = $marker[2] ne $Al_A ? 1 : 0;
+	my $B_dat = $marker[2] ne $Al_B ? 1 : 0;
+	
+	push @{$DATA{$allele_count}{Haplotype_A}}, $A_dat;
+	push @{$DATA{$allele_count}{Haplotype_B}}, $B_dat;
+	$allele_count++;
+    }    
+}
+
+
+my @TOTAL_KEYS = sort {$a <=> $b} keys %DATA;
+my $set_total  = Set::IntSpan::Fast->new(@TOTAL_KEYS);
+my $set_group  = Set::IntSpan::Fast->new(@GROUP);
+my $set_comp   = $set_total->diff($set_group);
+my @set_comp   = $set_comp->as_array();
+
+
+print_dat($FH_N1, \@GROUP);
+print_dat($FH_N2, \@set_comp);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub parse_indvs{
+
+    my @indvs = shift;
+    shift @indvs;
+    foreach my $i (@indvs){
+	$DATA{$i}{Haplotype_A} = ();
+	$DATA{$i}{Haplotype_B} = {};
+    }
+}
+
+#-----------------------------------------------------------------------------
+
+sub print_dat{
+    
+    my ($HL, $grouping) = @_;
+    open(FH, '>', $HL) || die "cannot open $HL for printing\n";
+
+
+    G: foreach my $key (sort {$a <=> $b} @{$grouping}){
+	next G if !defined @{$DATA{$key}{Haplotype_A}} ||  !defined @{$DATA{$key}{Haplotype_B}};
+	my @P1;
+	
+	foreach my $hap (@{$DATA{$key}{Haplotype_A}}){
+	    push @P1, $hap;
+	}
+	
+	print FH join " ", @P1;
+	print FH "\n";
+	
+	
+	my @P2;
+
+	foreach my $hap (@{$DATA{$key}{Haplotype_B}}){
+	   push @P2, $hap;
+	
+       }
+	print FH join " ", @P2;
+	print FH "\n";
+    }
+}

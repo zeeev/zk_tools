@@ -1,0 +1,107 @@
+#!/usr/bin/perl
+
+use threads;
+use threads::shared;
+use IO::Handle;
+use lib '/home/zkronenb/tools/zk_tools/';
+use CDR;
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+
+#flush that buffer or your threads will shit the bed on print
+
+$| = 1;
+
+#sometimes you just need a huge piddle lolz 
+$PDL::BIGPDL = 1;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+cdr.t -f cdr  -t  10 (number of processors) -g 1,2,34,5
+
+Description:
+
+
+This scrip takes a CDR and does R^2 calculatations for a population.
+This runs in parallele and uses PDL so get ready to burn baby!  you must 
+specify the number of threads you want to use and the indviduals you want to 
+include in your calculations.  This prints to STDOUT.
+
+
+";
+
+
+my ($help);
+my $file;
+my $n_threads;
+my $group;
+my $opt_success = GetOptions('help'      => \$help,
+			     "file=s"    => \$file,
+			     "group=s"  => \$group,
+			     "threads=s" => \$n_threads);
+
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file && $n_threads && $group;
+
+
+
+
+
+my $CDR = CDR->new('file' => $file);
+my @INDVS: shared = split /,/, $group; 
+print STDERR Dumper(@INDVS);
+my @FEATURES: shared  = @{$CDR->Get_Seqids};
+my $PRINT_FLAG: shared = 1;
+
+Run_Threads($CDR);
+
+#-----------------------------------------------------------------------------
+sub Run_Threads{
+
+    my $cdr = shift;
+
+    my @threads;
+
+    for (my $i = 1; $i <= $n_threads; $i++){
+        push @threads, threads->create(\&Do_Work, $cdr);
+    }
+
+    foreach (@threads){
+        $_->join;
+    }
+}
+
+#-----------------------------------------------------------------------------
+sub Do_Work{
+    
+    my $cdr = shift;
+    
+    while(defined $FEATURES[0]){
+	my $feature = shift @FEATURES;
+	my $print_vector = $cdr->Weir_Cockerham(\@INDVS, $feature);
+	lock($PRINT_FLAG);
+      
+	if(defined @{$print_vector}[0]){
+	    print join "\n", @{$print_vector};
+	    print "\n";
+	}
+    }
+}
+#-----------------------------------------------------------------------------
+
+ 
+
+    
+
+
+
+
