@@ -1,0 +1,48 @@
+#!/usr/bin/perl
+
+use lib '/home/zkronenb/tools/zk_tools/';
+use CDR;
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+cdr.t -f cdr 
+
+Description:
+
+
+
+";
+
+
+my ($help);
+my $file;
+my $build;
+my $opt_success = GetOptions('help'    => \$help,
+			     "file=s"  => \$file,
+			     "build=s" => \$build,
+			     );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file;
+my $cdr = CDR->new('file' => $file);
+my $features = $cdr->Get_Seqids;
+
+#excluding C-rup 
+
+my @indvs = (0..40);
+
+$cdr->Distance_Matrix(\@indvs, $features);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
