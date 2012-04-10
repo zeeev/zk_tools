@@ -1,0 +1,137 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Tabix;
+use Statistics::Descriptive;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+BIN_VALUE_BY_REGION_W_BUILD -b build.file.txt -d data_file.gz -w window -v value_column -c stats descriptive call
+
+
+Description:
+
+I bin non overlapping windows.  If a feature is shorter than the window size 
+I will just use the whole feature.  use the value flag to tell me what data you want worked on (zero indexed).
+
+";
+
+
+my ($help);
+my $build;
+my $VALUE_COLUMN;
+my $window;
+my $data;
+my $call; 
+my $opt_success = GetOptions('help'      => \$help,
+			     'call=s'    => \$call,
+			     'data=s'    => \$data,
+			     'build=s'   => \$build,
+			     'window=s'  => \$window,
+			     'value=s'   => \$VALUE_COLUMN,
+);
+
+
+die $usage if $help || ! $opt_success;
+die $usage unless $data && $build;
+
+
+my $regions = BIN_REGIONS($build, $window);
+$regions    = PARSE_REGIONS($data, $regions);
+my $results = AGGRI_REGIONS($regions, $call);
+
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+
+sub BIN_REGIONS{
+    
+    my %REGION_STRUCT;
+
+    my ($build_file, $window) = @_;
+    
+    open (my $IN, '<', $build_file) or die "Can't open $build_file for reading\n$!\n";
+    
+    LINE: while (my $line = <$IN>) {
+	chomp $line;
+	my @line_contents = split /\s+/, $line;
+	next LINE if ! defined $line_contents[0];
+
+	my $tail = 1;
+	my $cur  = 1;
+	if($line_contents[2] > $window){
+	    while ($tail + $window <= $line_contents[2]){
+		my $cur = $tail + $window;
+		$REGION_STRUCT{$line_contents[0]}{"$tail:$cur"} = 'NA';
+		$tail = $cur;
+	    }
+	}
+	$tail = 0 if $tail == $window + 1;
+       
+	$REGION_STRUCT{$line_contents[0]}{"$tail:$line_contents[2]"} = 'NA';
+
+    }
+    return \%REGION_STRUCT;
+}
+
+
+#-----------------------------------------------------------------------------
+sub PARSE_REGIONS {
+    
+    my ($data_file, $regions, $genomic_column, $value_column) = @_;    
+    my $tabix_obj = Tabix->new(-data=>$data_file); 
+    my @data_file_seqs = $tabix_obj->getnames;     	
+    SEQID: foreach my $seqid (keys %{$regions}){
+	print STDERR "working on $seqid\n";
+	POSTION: foreach my $pos (keys %{$regions->{$seqid}}){
+	    next SEQID if ! grep {/$seqid$/} @data_file_seqs;
+	    $regions->{$seqid}{$pos} = QUERY_RANGE($tabix_obj, $seqid, $pos);
+	}
+    }
+    return $regions;
+}
+
+#-----------------------------------------------------------------------------
+
+sub QUERY_RANGE { 
+
+    my ($data, $seqid, $pos) = @_ ;
+    my @VALUES;
+    my @positions = split /:/, $pos;
+    my $iter    = $data->query($seqid, $positions[0], $positions[1]);
+    my %gvf_dat;
+    
+    SEQID: while(my $l = $data->read($iter)){
+	chomp $l;
+	my @l = split /\t/, $l;
+	push @VALUES, $l[$VALUE_COLUMN];
+    }
+    return \@VALUES;
+}
+
+#-----------------------------------------------------------------------------
+
+sub AGGRI_REGIONS{
+    my ($regions, $call) = @_;
+    
+    
+  SEQID: foreach my $seqid (keys %{$regions}){
+    POS: foreach my $pos (keys %{$regions->{$seqid}}){
+	next POS if $regions->{$seqid}{$pos} eq 'NA';
+	next POS if ! defined @{$regions->{$seqid}{$pos}}[0];
+	my $count = scalar  @{$regions->{$seqid}{$pos}};
+	next POS if $count < 5;
+	my $stat = Statistics::Descriptive::Full->new();
+	my @coord = split /:/, $pos;
+	$stat->add_data($regions->{$seqid}{$pos});
+	my $results   = $stat->$call();
+	print "$seqid\t$coord[0]\t$coord[1]\t$count\t$results\n";
+    }
+  }
+}
