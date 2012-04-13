@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+CHR_POS_GENOMIC_POS -b build file -f file.to.fix.txt -c position.column
+
+Description:
+
+The purpose of this script is to take a POS column and change its coordiates
+to be on a genomic scale rather than a chromosome scale. The position.column is 0 indexed ie column 0 = 1;
+
+";
+
+
+my ($help);
+my $build;
+my $file;
+my $column;
+my $opt_success = GetOptions('help'     => \$help,
+			     'build=s'  => \$build,
+			     'file=s'   => \$file,
+			     'column=s' => \$column,
+			     );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file && $column && $build;
+
+my %BUILD_RECORD;
+
+Parse_Build();
+Repos_Data();
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub Parse_Build{
+    my $running_position = 0;
+    open (my $IN, '<', $build) or die "Can't open $build for reading\n$!\n";
+    while (my $l = <$IN>) {
+	chomp $l;
+	my @l = split /\t/, $l;
+	$BUILD_RECORD{$l[0]} = $running_position;
+	$running_position += $l[2];
+    }   
+}
+
+#-----------------------------------------------------------------------------
+
+sub Repos_Data{
+    open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+    while (my $l = <$IN>) {
+        chomp $l;
+	my @l = split /\t/, $l;
+	my $pos = $l[$column];
+	$l[$column] =  $BUILD_RECORD{$l[0]} + $pos;
+	print join "\t", @l;
+	print "\n";
+    }
+}
