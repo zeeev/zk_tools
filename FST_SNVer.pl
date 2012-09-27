@@ -3,6 +3,8 @@ use strict;
 use warnings;
 use Getopt::Long;
 use Math::BigInt;
+use lib "/home/zkronenb/tools/zk_tools";
+use fet;
 
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
@@ -11,27 +13,31 @@ my $usage = "
 
 Synopsis:
 
-PARSE_SNVer.pl SNVer.pooled.filtered.vcf -t 1 -b 2 
+PARSE_SNVer.pl SNVer.pooled.filtered.vcf -t 1 -b 2 -d 10 > output.txt
 
 Description:
 
-pass in the SNVER data and the -target pop id and -backround pop id.  
-The ids are the column order ie the first pool is pop1
+file:            First argument to pass in.  This should be the direct output from SNVer. 
+-t/--target:     The column(s) in the file corrisponding to the libraries to use as the target.
+-b/--background: The column(s) in the file corrisponding to the libraries to use as the background.
+-d/--depth:      The depth cutoff to use.  Both the target and background depths must be greater than -d.
 
 ";
 
 my ($help);
 my $t;
 my $b;
+my $depth;
 my $opt_success = GetOptions('help'        => \$help,
 			     'target=s'    => \$t,
+			     'depth=s'     => \$depth,
 			     'backround=s' => \$b,
 );
 
 die $usage if $help || ! $opt_success;
 
 my $file = shift;
-die $usage unless $file && $t && $b;
+die $usage unless $file && $t && $b && $depth;
 open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
 
 my %PRAGMA;
@@ -50,8 +56,8 @@ LINE: while (my $l = <$IN>) {
 	my $t_dat    = Group_Column($line_dat, $t);
 	my $b_dat    = Group_Column($line_dat, $b);
 
-	next LINE if @{$b_dat}[1] < 5;
-	next LINE if @{$t_dat}[1] < 5;
+	next LINE if @{$b_dat}[1] < $depth;
+	next LINE if @{$t_dat}[1] < $depth;
 	
 	
 	my $res = Fst($b_dat, $t_dat);
@@ -119,7 +125,6 @@ sub Parse_Genotypes{
 sub Fst{
 
 # John H. Gillespie pg 132                                                                                        
-    
     my ($background, $target) = @_;
 
     my @background = @{$background};
@@ -129,6 +134,9 @@ sub Fst{
 
     my $b_q = $background[0] / $background[1];
     my $t_q = $target[0]     / $target[1];
+
+    my $b_p = $background[1] - $background[0];
+    my $t_p = $target[1] - $target[0]; 
 
     my $b_2pq = 2 * (1 - $b_q) * $b_q;
     my $t_2pq = 2 * (1 - $t_q) * $t_q;
@@ -147,7 +155,11 @@ sub Fst{
 	$Fst = ($Gs - $Gt) / (1 - $Gt);
     }
     
+
+    my $fishers = fet::fet($b_q, $b_p, $t_q, $t_p, 1);
+
     $STRUCT{fst}      = $Fst;
+    $STRUCT{fishers}  = $fishers;
     $STRUCT{b}{het}   = $b_2pq;
     $STRUCT{t}{het}   = $t_2pq;
     $STRUCT{t}{tq}    = $t_q;
@@ -162,7 +174,6 @@ sub Fst{
 }
 
 #-----------------------------------------------------------------------------
-
 sub Group_Column{
 
     my($line_dat, $group_numbers) = @_;
@@ -175,7 +186,6 @@ sub Group_Column{
     }
     return \@counts;
 }
-
 #-----------------------------------------------------------------------------
 
 sub G_test{
@@ -207,7 +217,6 @@ sub G_test{
     $sum += log10(($q_obs_t / $q_exp_t)) if $q_obs_t > 0 && $q_exp_t > 0;
     $sum += log10(($p_obs_t / $p_exp_t)) if $p_obs_t > 0 && $p_exp_t > 0;
     
-
     my $Gstat = 'NA';
     $Gstat = 2 * $sum if $sum > 0;
     
