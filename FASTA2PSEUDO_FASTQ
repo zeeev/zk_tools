@@ -1,0 +1,65 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+FASTA2PSEUDO_FASTQ <How the hell do you use this thing>
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+
+$/ = '>';
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+while (<$IN>) {
+    chomp;
+    process_string($_) if $_ !~ /^\s+/ || ! defined $_;
+    
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub process_string {
+    my $seq = shift;
+    my @dat = split /\n/, $seq;
+    my $id  =  shift @dat; 
+    $id =~ s/\|/-/g;
+    $seq = join "", @dat;
+    print Dumper $id;
+    my @seven_sixers = unpack '(A76)*', $seq;
+    foreach my $s (@seven_sixers) { 
+	
+	
+	
+	print "\@$id\n";
+	print "$s\n";
+	print "+$id\n";
+	print "V" x length($s);
+	print "\n";
+	
+
+    }
+}
+
