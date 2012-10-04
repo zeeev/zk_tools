@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+REHH_BEAGLE <How the hell do you use this thing>
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+my %DAT;
+
+for(my $i = 0; $i < 80; $i++){
+    $DAT{$i} = [];
+}
+
+while (<$IN>) {
+    chomp;
+    next if $_ =~ /^I/;
+    next unless $_ =~ /scaffold612:/;
+    my @l = split /\s+/, $_;
+    shift @l;
+    my ($seqid, $pos, $ref) = split /:/, shift @l;
+    my $count = 0;
+    for(my $j = 0; $j < 80; $j++){
+	my $a = shift @l;
+	if($a eq $ref){
+	    push @{$DAT{$j}}, 1;
+	}else{
+	    push @{$DAT{$j}}, 2;
+	}
+    }
+}
+
+while(my($id, $value) = each %DAT){
+    print "$id ";
+    print join " ", @{$value};
+    print "\n";
+}
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub {
+
+}
+
