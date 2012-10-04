@@ -1,0 +1,79 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+CUT.NOCALL.FREQ -m 0.05 -n 0.1
+
+Description:
+
+Brian Browning suggests not allowing for less than three copys of an allele for a 
+small dataset like pigeons (-m 0.035).
+
+If this data is going into LDhat2 Gilean McVean recommends no more than 0.05% missing data.
+
+";
+
+
+my ($help);
+my $nocall  = 0.05;
+
+
+# Brian Browning author of BEAGLE
+
+#I would filter your input data and remove markers with exceptionally low MAF (say markers with < 3 copies in you sample) before running the fastIBD analysis.
+
+my $maf     = 0.035;   
+my $opt_success = GetOptions('help'     => \$help,
+			     "nocall=s" => \$nocall,
+			     "maf=s"    => \$maf,  
+			     );
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+
+
+my $len;
+my $count = 0 ;
+while (my $l = <$IN>) {
+    $count++;
+    chomp $l;
+    my @l = split /\t/, $l;
+    if($count == 1){
+	print "$l\n";
+        shift @l;
+        shift @l;
+	$len = scalar @l;
+    }
+    else{
+	shift @l;
+	shift @l;
+	my @nc = grep {/\^/} @l;
+	my %alleles;
+	my $print_flag = 1; 
+	
+	map {$alleles{$_}++} grep {!/\^/} @l;
+	if (defined $nc[0]){
+	    $print_flag = 0 if (scalar @nc / $len) > $nocall;
+	}else{
+	    while(my ($a, $a_count) = each %alleles){
+		$print_flag = 0  if ($a_count / $len) < $maf;
+	    }
+	}
+	print "$l\n" if $print_flag == 1;
+    }
+}
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
