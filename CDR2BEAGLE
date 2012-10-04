@@ -1,0 +1,69 @@
+#!/usr/bin/perl
+
+use lib '/home/zkronenb/tools/zk_tools/';
+use CDR;
+use strict;
+use warnings;
+use Getopt::Long;
+use Data::Dumper;
+
+
+#flush that buffer or your threads will shit the bed on print
+
+#$| = 1;
+
+#sometimes you just need a huge piddle lolz 
+$PDL::BIGPDL = 1;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+cdr.t -f cdr  
+
+Description:
+
+prints beagle
+
+
+";
+
+
+my ($help);
+my $file;
+my $opt_success = GetOptions('help'      => \$help,
+			     "file=s"    => \$file
+    );
+
+
+die $usage if $help || ! $opt_success;
+die $usage unless $file;
+
+
+my $CDR = CDR->new('file' => $file);
+$CDR->Print_Beagle_Header();
+
+my $tabix = Tabix->new(-data => $CDR->{'file'});
+
+my @FEATURES  = @{$CDR->Get_Seqids};
+
+foreach my $feature (@FEATURES){ 
+    my $it = $tabix->query($feature);
+  LINE: while(my $l = $tabix->read($it)){
+      $CDR->{line}{raw} = $l;
+      $CDR->_Parse_Line();
+      next LINE unless $CDR->{line}{refined}{type} eq 'SNV';
+      $CDR->_Print_Beagle;
+  }
+}
+
+ 
+
+    
+
+
+
+
