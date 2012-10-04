@@ -1,0 +1,171 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Tabix;
+use Set::IntervalTree;
+use Data::Dumper;
+use File::Glob ':glob';
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/CHECK_CDR_GAPS -b build.txt  \*.gvf.gz
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+my $build;
+my ($help);
+my $target;
+my $opt_success = GetOptions('help'       => \$help, 
+			     "build=s"    => \$build,
+			     "target=s"   => \$target
+	     );
+
+
+
+die $usage if $help || ! $opt_success;
+die $usage unless $build && $target;
+
+my %BUILD;
+my %FEATURES;
+my %TARGET;
+my %FILE_KEY;
+my %PERMUTE;
+my @FILES = @ARGV;
+
+
+Load_Target_Ids($target);
+Load_File_Keys();
+Load_Features();
+Parse_Build($build);
+
+FEATURE: foreach my $feature (keys %BUILD){
+    next FEATURE unless defined $feature;
+    my $gap_by_feature = Build_Trees($feature);
+    Process_Results($feature, $gap_by_feature);
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub Load_Target_Ids{
+    my $dat = shift;
+    map {$TARGET{$_} = 1} split /,/, $dat;
+}
+#-----------------------------------------------------------------------------
+sub Load_File_Keys{
+    my $count = 0;
+    for(@FILES){
+	$FILE_KEY{$_} = $count;
+	$PERMUTE{$count} = 0;
+	$count++;
+    }
+}
+#-----------------------------------------------------------------------------
+# Loading Feature IDs to allow for rapid checks if seqid exists
+sub Load_Features{
+  FILE: foreach my $f (@FILES){
+      my $t    = Tabix->new(-data=>$f);
+      map {$FEATURES{$f}{$_}++} $t->getnames();
+  }
+}
+#-----------------------------------------------------------------------------
+# Loading Binary Tree for rapid lookup.  Looping over each feature.
+
+sub Build_Trees{
+  
+    my $feature = shift;    
+    my %tree;
+
+    $tree{low_depth} = Set::IntervalTree->new;
+    $tree{high_depth} = Set::IntervalTree->new;
+
+  FILE: foreach my $f (@FILES){
+
+      my $t    = Tabix->new(-data=>$f);
+      if(! exists $FEATURES{$f}{$feature}){
+	  $tree{low_depth}->insert($FILE_KEY{$f}, 0, $BUILD{$feature});	  
+      }
+      else{
+	  my $iter = $t->query($feature);
+	LINE: while(my $l = $t->read($iter)){
+	    chomp $l;
+	    my @l = split /\t/, $l;
+	    my @att  = split /=|;/, $l[8];
+	    next LINE unless $l[2] eq 'gap';
+	    $tree{$att[3]}->insert($FILE_KEY{$f}, $l[3], $l[4])
+	    }
+      }
+  }
+    return \%tree;
+}
+
+#-----------------------------------------------------------------------------
+sub Process_Results{
+    my($feature, $gap_by_feature) = @_;    
+    print STDERR  "currently: $feature\n"; 
+    LOOP_OVER_FEAT: for(my $i = 0; $i < $BUILD{$feature}; $i++){
+	my @hits = @{$gap_by_feature->{high_depth}->fetch($i, $i)};
+	my $permute_flag = 0;
+	permute(\@hits, $i, $feature) if (scalar @hits) > 5 ; 
+    }
+}
+#-----------------------------------------------------------------------------
+sub permute{
+    my ($hits, $pos, $seqid) = @_;
+    my %TEMP_PERMUTE = %PERMUTE;
+    foreach my $hit (@{$hits}){
+	$TEMP_PERMUTE{$hit} = 1;
+    }
+    my $target_occurance = 0;
+    my @targets = keys %TARGET;
+    foreach my $t (@targets){
+	$target_occurance += $TEMP_PERMUTE{$t};
+    }
+    if($target_occurance > 2 ){
+	
+	my $total_occurance;
+	my @inds = keys %TEMP_PERMUTE;
+	for(my $i = 1; $i <= 1000; $i++){
+	    my $n_hits = 0;
+	    fisher_yates_shuffle(\@inds);
+	    foreach my $indv (@inds[0..scalar(@targets)]){
+		$n_hits++ if $TEMP_PERMUTE{$indv} == 1;
+	    }	    
+	    $total_occurance++ if $n_hits >= $target_occurance;	    
+	}
+	my $p = $total_occurance / 1000;
+	print "$seqid\t$pos\t$p\n";
+    }
+}
+#-----------------------------------------------------------------------------   
+sub Parse_Build{
+    my $file = shift;
+    print STDERR "Current Stage: Parsing $file file\n";
+    open(FH, '<', $file) || die "cannot open $file\n";
+    while(my $l = <FH>){
+        next if $l =~ /^\s+|#/;                                                            
+        my @l = split /\s+/, $l;
+        die "$file is not in correct format\n" if scalar @l != 3;
+        $BUILD{$l[0]} = $l[2];
+    }
+}
+#----------------------------------------------------------------------------- 
+sub fisher_yates_shuffle {
+    my $array = shift;
+    my $i;
+    for ($i = @$array; --$i; ) {
+        my $j = int rand ($i+1);
+        next if $i == $j;
+        @$array[$i,$j] = @$array[$j,$i];
+    }
+}
