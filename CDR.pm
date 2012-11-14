@@ -11,7 +11,6 @@ use List::MoreUtils qw(uniq);
 use Math::BigFloat;
 use Bit::Vector;
 
-
 #-----------------------------------------------------------------------------
 #--------------------------------- Constructor -------------------------------
 #-----------------------------------------------------------------------------
@@ -30,9 +29,14 @@ sub new {
     my $self = bless {}, $class;
     $self->_initialize_args(@_);
     $self->_Parse_Pragma;
-    system ("bgzip $self->{'file'}");
-    system ("tabix -f -s 1 -b 2 -e 3 $self->{'file'}\.gz");
-    $self->{'file'} = "$self->{'file'}\.gz";
+    if($self->{'file'} !~ /\.gz$/){
+	system ("bgzip $self->{'file'}");
+	system ("tabix -f -s 1 -b 2 -e 3 $self->{'file'}\.gz");
+	$self->{'file'} = "$self->{'file'}\.gz";
+    }
+
+    die "no defined pragma" unless defined $self->{'pragma'};
+    die "no defined filekeys" unless defined $self->{'file_keys'};
     $self->_Load_Seqids();
     return $self;
 }
@@ -44,7 +48,7 @@ sub _initialize_args {
 
     my $args = $self->prepare_args(@_);
     # Set valid class attributes here
-    my %valid_attributes = map {$_ => 1} qw(file fh sparse);
+    my %valid_attributes = map {$_ => 1} qw(file file_pragma);
     for my $attribute (keys %{$args}) {
         if (! exists $valid_attributes{$attribute}) {
             my $message = ("$attribute is an invalid attribute and will be" .
@@ -92,6 +96,21 @@ sub file {
 }
 
 #----------------------------------------------------------------------------- 
+
+sub file_pragma {
+    my ($self, $filename) = @_;
+
+    if ($filename) {
+        if (! -r $filename) {
+            my $message = "$filename is not readable";
+            $self->throw('file_not_readable', $message);
+        }
+	$self->{file_pragma} = $filename;
+    }
+    return $self->{file_pragma};
+}
+
+#-----------------------------------------------------------------------------   
 
 =head2 sparse
 
@@ -229,7 +248,7 @@ sub _Parse_Pragma{
     my $self = shift;    
 	my @pragma;
 	my %file_key;
-	my $file = $self->{'file'};
+	my $file = $self->{file_pragma};
 	open(FH, '<', $file) || die "cannot open $file\n";
 	while(my $l = <FH>){
 	    chomp $l;
@@ -270,6 +289,24 @@ sub _Parse_Line{
 }
 
 #-----------------------------------------------------------------------------   
+sub start{
+    my $self = shift;
+    $self->_Parse_Raw_Line if ! $self->{'line'}{'refined'}{'start'};
+    return $self->{'line'}{'refined'}{'start'};
+}
+#-----------------------------------------------------------------------------   
+sub end{
+    my $self = shift;
+    $self->_Parse_Raw_Line if ! $self->{'line'}{'refined'}{'start'};
+    return $self->{'line'}{'refined'}{'start'};
+}
+#-----------------------------------------------------------------------------     
+sub _type{
+    my $self = shift;
+    $self->_Parse_Raw_Line if ! $self->{'line'}{'refined'}{'type'};
+    return $self->{'line'}{'refined'}{'type'};
+}
+#-----------------------------------------------------------------------------     
 
 sub _Parse_Raw_Line{
 
@@ -399,61 +436,52 @@ sub _Count_Genotypes{
 #-----------------------------------------------------------------------------   
 
 sub HWE_Departure{
+    my ($self, $chr) = @_;
+    my $tabix = Tabix->new(-data => $self->{'file'});
+    my $it = $tabix->query($chr);
+    return if ! defined $it;
 
-    my $self = shift;
-
-    return if $self->{line}{refined}{type} ne 'SNV';
-    
-    my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
-    my @counts  = _Count_Genotypes($self->{'line'}{'genotypes'});
-    my $ref = @{$self->{line}{refined}{ref}}[0];
-    my ($alt) = grep {!/\^|$ref/} @alleles;
-    return if scalar (grep {!/\^|$ref/} @alleles) != 1;
-        
-
-    # return if $counts[0]->{allele_counts}{nocall} < 4; 
-    
-    #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[1]"};     
-    #  return if ! defined $counts[2]->{"$alleles[0]:$alleles[0]"};
-    #  return if ! defined $counts[2]->{"$alleles[1]:$alleles[1]"};
+  LINE: while(my $l = $tabix->read($it)){
+      $self->{line}{raw} = $l;
+      $self->_Parse_Line();
+      my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+      my @counts  = _Count_Genotypes($self->{'line'}{'genotypes'});
+      my $ref = @{$self->{line}{refined}{ref}}[0];
+      my ($alt) = grep {!/\^|$ref/} @alleles;
+      return if scalar (grep {!/\^|$ref/} @alleles) != 1;
       
-    my $total_alleles   = $counts[0]->{'allele_counts'}{'called'};
-    my $total_genotypes = $counts[0]->{'genotype_counts'}{'called'};
-    my $p               = 0;
-    my $q               = 0;
+      my $total_alleles   = $counts[0]->{'allele_counts'}{'called'};
+      my $total_genotypes = $counts[0]->{'genotype_counts'}{'called'};
+      
+      my ($p, $q) = (0,0);
+	      
+      $p = $counts[1]->{$ref} / $total_alleles if defined $counts[1]->{$ref} && $counts[1]->{$ref} > 0;
+      $q = $counts[1]->{$alt} / $total_alleles if defined $counts[1]->{$alt} && $counts[1]->{$alt} > 0;
+                  
+      my $exp_pp = int ($p**2  * $total_genotypes);
+      my $exp_qq = int ($q**2  * $total_genotypes);
+      my $exp_pq = int (2 * $p * $q * $total_genotypes); 
+      
+      my ($AA, $AB, $BB, $AN, $BN) = (0,0,0,0,0);
+      
+      $AB = $counts[2]->{"$alleles[0]:$alleles[1]"} if defined $counts[2]->{"$alleles[0]:$alleles[1]"};
+      $AA = $counts[2]->{"$ref:$ref"} if defined $counts[2]->{"$ref:$ref"};
+      $BB = $counts[2]->{"$alt:$alt"} if defined $counts[2]->{"$alt:$alt"};
+      $AN = $counts[2]->{"$ref:\^"} if defined $counts[2]->{"$ref:\^"};
+      $BN = $counts[2]->{"$alt:\^"} if defined $counts[2]->{"$alt:\^"};
+      
+      my $p_pp =  _Chi_Lookup($exp_pp, $AA);
+      my $p_pq =  _Chi_Lookup($exp_pq, $AB);
+      my $p_qq =  _Chi_Lookup($exp_qq, $BB);
+      
+ 
+      my $chi = $p_pp + $p_pq + $p_qq;
+      my $p_value   =  1 - Math::CDF::pchisq($chi, 1);  
     
-    $p = $counts[1]->{$ref} / $total_alleles if defined $counts[1]->{$ref};
-    $q = $counts[1]->{$alt} / $total_alleles if defined $counts[1]->{$alt};
-    
-    my $exp_pp = int ($p**2  * $total_genotypes);
-    my $exp_qq = int ($q**2  * $total_genotypes);
-    my $exp_pq = int (2 * $p * $q * $total_genotypes); 
-
-    my $AA = 0;
-    my $AB = 0; 
-    my $BB = 0;
-    my $AN = 0;
-    my $BN = 0;
-
-
-    $AB = $counts[2]->{"$alleles[0]:$alleles[1]"} if defined $counts[2]->{"$alleles[0]:$alleles[1]"};
-    $AA = $counts[2]->{"$ref:$ref"} if defined $counts[2]->{"$ref:$ref"};
-    $BB = $counts[2]->{"$alt:$alt"} if defined $counts[2]->{"$alt:$alt"};
-    $AN = $counts[2]->{"$ref:\^"} if defined $counts[2]->{"$ref:\^"};
-    $BN = $counts[2]->{"$alt:\^"} if defined $counts[2]->{"$alt:\^"};
-    
-
-   # my $p_pp =  _Chi_Lookup($exp_pp, $AA);
-   # my $p_pq =  _Chi_Lookup($exp_pq, $AB);
-   # my $p_qq =  _Chi_Lookup($exp_qq, $BB);
-
-    #my $chi = $p_pp + $p_pq + $p_qq;
-    #my $p_value   =  1 - Math::CDF::pchisq($chi, 1);
-    
-    #print "$self->{line}{refined}{start}\t$p_pp\t$AA\t$AB\t$BB\t$exp_pp\t$exp_pq\t$exp_qq\t$p\t$q\t$chi\t$p_value\n";
-    print "$self->{line}{refined}{start}\t$AA\t$AB\t$BB\t$AN\t$BN\n";
-} 
-
+      #print "$self->{line}{refined}{start}\t$p_pp\t$AA\t$AB\t$BB\t$exp_pp\t$exp_pq\t$exp_qq\t$p\t$q\t$chi\t$p_value\n";
+      print "$self->{line}{refined}{start}\t$AA\t$AB\t$BB\t$AN\t$BN\n";
+  } 
+}
 #-----------------------------------------------------------------------------   
 
 sub _Chi_Lookup{
@@ -478,23 +506,20 @@ sub Weir_Cockerham{
 #genome scans for two populations.  All subroutines used for this calculation
 #begin with wc_.  This has been mimiced after Pegas [R]'s equations.  The pigeon
 #headcrest snp has validated this stie. 
-
+    
 #library(pegas)
 #my.dat<-as.data.frame(cbind(c(rep("T/T", 8), rep("T/C",2), rep("C/C", 23)),c(rep(1, 8), rep(2,2), rep(2, 23))))
 #colnames(my.dat)<-c("genotypes", "population")
 #my.loci<-as.loci(my.dat)
-
-
+    
     my ($self, $groups, $scaff) = @_;
-      
-      my $t = Tabix->new(-data => $self->{'file'});
-      my $it = $t->query($scaff);
-
-      next SCAFF if ! defined $it;
-      
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $it = $t->query($scaff);
+    next SCAFF if ! defined $it;
+    
     my @DAT;
 
-    LINE: while(my $l = $t->read($it)){
+  LINE: while(my $l = $t->read($it)){
         $self->{line}{raw} = $l;
         $self->_Parse_Line();
 	$self->_Group($groups);
@@ -506,7 +531,6 @@ sub Weir_Cockerham{
 	my @g_a          = _Count_Genotypes($self->{'line'}{'group_A'});
 	print STDERR Dumper(@g_a) if ! defined $g_a[0]->{allele_counts}{called};
 	next LINE if $g_a[0]->{allele_counts}{called} == 0; 	
-	
 	my @g_b          = _Count_Genotypes($self->{'line'}{'group_B'});
 	next LINE if $g_b[0]->{allele_counts}{called} == 0;
 	my ($n_bar, $r)  = wc_n_bar([\@g_a, \@g_b]);
@@ -522,9 +546,7 @@ sub Weir_Cockerham{
 	my $a            = wc_a($n_bar, $r, $n_c, @{$p_bar}[0], @{$s_2}[0], $h_bar);
 	my $b            = wc_b($n_bar, @{$p_bar}[0], $r, @{$s_2}[0], $h_bar);
 	my $c            = wc_c($h_bar);
-
 	next LINE if $a == 0 || $c == 0;
-
 	my $fit =  1 - ($c/($a + $b + $c));
 	my $fst =  $a/($a + $b + $c);
 	my $fis =  1 - ($c/($b + $c));
@@ -1228,7 +1250,7 @@ sub LINKER{
 	    push @vals, 3 if $self->{line}{genotypes}{$key}{genotype} eq $homn;
 	}
 
-	  next LINE if ! defined @vals[0];
+	  next LINE if ! defined $vals[0];
 	  push @pos,  \@vals;
       }
 	$start_end++;	
@@ -1394,12 +1416,6 @@ sub E_1_2_TD{
     return $e1, $e2;
 }
 #-----------------------------------------------------------------------------   
-sub K_hat_TD{
-
-
-}
-
-#-----------------------------------------------------------------------------
 
 sub COAL_T{
 
@@ -1448,5 +1464,262 @@ sub get_tag_from_string {
     return \@tags;
 }
 
+#----------------------------------------------------------------------------- 
+sub crap2{
+
+    my ($self, $groups, $scaff, $window_len, $step) = @_;
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $it = $t->query($scaff);
+    return if ! defined $it;
+    
+    my %NON_REF_ALLELES;
+    my $non_ref = \%NON_REF_ALLELES;
+    my $current_window = $window_len;
+    
+  LINE: while(my $l = $t->read($it)){
+      $self->{line}{raw} = $l;
+      $self->_Parse_Line();
+      $self->_Group($groups);
+      next LINE unless $self->_type eq 'SNV';
+      my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+      my @gens = grep {!/\^/} @alleles;
+      next LINE if (scalar grep {!/\^/} @alleles) != 2;
+      my $ref = @{$self->{line}{refined}{ref}}[0];
+      my ($alt) = grep {!/\^|$ref/} @alleles;
+      
+      # genotype counts 
+
+#0  HASH(0x5f7fbf0)   'allele_counts' => HASH(0x6358000)
+#      'called' => 16
+#      'nocall' => 66
+#   'genotype_counts' => HASH(0x6357fe0)
+#      'called' => 8
+#      'nocall' => 33
+#1  HASH(0x5f7f8f0)
+#   'A' => 5
+#   'G' => 11
+#   '^' => 66
+#2  HASH(0x5f7f920)
+#   'A:A' => 2
+#   'A:G' => 1
+#   'G:G' => 5
+#   '^:^' => 33
+      
+      my @all        = _Count_Genotypes($self->{'line'}{'genotypes'});
+      my @target     = _Count_Genotypes($self->{'line'}{'group_A'});
+      my @background = _Count_Genotypes($self->{'line'}{'group_B'});
+      
+      # position
+
+      my $loci = $self->start;
+      
+      #number of non reference alleles at that given position
+
+      $non_ref->{$loci}{alt}{all}        = $all[1]->{$alt};
+      $non_ref->{$loci}{alt}{target}     = $target[1]->{$alt};
+      $non_ref->{$loci}{alt}{background} = $background[1]->{$alt};
+      
+      # number of called chromosomes
+
+      $non_ref->{$loci}{called}{all}        = $all[0]->{allele_counts}{called};
+      $non_ref->{$loci}{called}{target}     = $target[0]->{allele_counts}{called};
+      $non_ref->{$loci}{called}{background} = $background[0]->{allele_counts}{called};
+
+     ($current_window, $non_ref) = _process_window($non_ref, $current_window, $window_len, $loci, $step) if $loci >= $current_window;
+  }
+}
+#----------------------------------------------------------------------------- 
+sub _process_window{
+    
+    my ($allelic_count, $current_window, $window_len, $current_pos, $offset, $chr_targ, $chr_back) = @_;
+    my $step = $current_window + $offset;
+
+    my %spectra;
+
+    while(my ($loci_pos, $type_hash) = each %{$allelic_count}){
+	while(my ($set, $count) = each %{$type_hash->{alt}}){
+	    $count = 0 if !defined $count;
+	    $spectra{$set}{$count}++;
+	    delete $allelic_count->{$loci_pos}{$set} if $loci_pos < $step;
+	}	
+    }
+
+    my %total_seg;
+  
+    while(my ($loci_pos, $type_hash) = each %{$allelic_count}){
+	$total_seg{target}{loci}++;
+	$total_seg{background}{loci}++;
+	$total_seg{all}{loci}++;
+	while(my ($set, $count) = each %{$type_hash->{called}}){   
+	    if (defined $allelic_count->{$loci_pos}{called}{$count}){
+		$total_seg{$set}{called_alleles} += $allelic_count->{$loci_pos}{called}{$count};
+		$total_seg{$set}{max} = $allelic_count->{$loci_pos}{called}{$count} if $allelic_count->{$loci_pos}{called}{$count} > $total_seg{max};
+		delete $allelic_count->{$loci_pos}{$set} if $loci_pos < $step;
+	    }
+	}
+    }
+    
+    my $T = _CDF($spectra{target}, 100);
+    my $B = _CDF($spectra{background}, 100);
+    my $A = _CDF($spectra{all}, 100);
+    
+    Theta($spectra{target},$total_seg{target}) if $total_seg{target}{loci} > 10;
+
+    my $D = _KS_TEST($T, $B, $current_window);
+    
+    $current_window += $window_len; 
+    return($current_window, $allelic_count);
+}
+#----------------------------------------------------------------------------- 
+sub _KS_TEST{
+
+    my ($target_cdf, $background_cdf, $current_window) = @_;
+    my $max_diff = 0;
+    foreach my $non_ref (keys %{$target_cdf}){
+	my $diff = abs($target_cdf->{$non_ref} - $background_cdf->{$non_ref});
+	$max_diff = $diff if $diff > $max_diff;
+    }
+    print "$max_diff\t$current_window\n";
+    return($max_diff);
+}
+#----------------------------------------------------------------------------- 
+sub _CDF{
+    
+    my ($spectra, $max) = @_;
+    my $sum = 0;
+  NON_REF: for(my $i = 0; $i <= $max; $i++){
+      next NON_REF if ! exists $spectra->{$i};
+      $sum += $spectra->{$i};	
+  }
+    my %cdf;
+    my $last = 0;
+  NON_REF: for(my $i = 0; $i <= $max; $i++){
+      $cdf{$i} = $last;
+      next NON_REF if! defined $spectra->{$i};
+      my $current = ($spectra->{$i} + $last) / $sum;
+      $cdf{$i} += $current;
+      $last = $current;
+  }
+    
+    return(\%cdf);
+}
+#----------------------------------------------------------------------------- 
+sub Theta {
+    my ($data, $total_seg) = @_;
+    my $a_n = 0;
+
+    my $avg_chrs = $total_seg->{called_alleles} / $total_seg->{loci};
+
+    for (my $i = 1; $i < 2 * $avg_chrs; $i++){
+        $a_n += 1 / $i;
+    }
+ 
+    my $num          = 0;
+    my $fu_sum_theta = 0;
+    my $H_sum_theta  = 0;
+    my $PI_sum_theta = 0;
+
+  NON_REF: foreach my $i (keys %{$data}){
+      my $i_i     = $i;
+      my $Xi      = $i_i / $total_seg->{loci};
+      my $Theta_i = $i * $Xi;
+
+      $H_sum_theta  += $Theta_i * $i;
+      $PI_sum_theta += $Theta_i * ($total_seg->{max} - $i);
+      $num          += $Theta_i * (1 / $i) if $i > 0;
+      $fu_sum_theta += $Theta_i;
+
+
+  }  
+      my $two_over_chr = 2/($avg_chrs * ($avg_chrs  - 1));    
+      my $Pi_theta        = $PI_sum_theta * $two_over_chr;
+      my $Fu_theta        = (1 / $avg_chrs) * $fu_sum_theta;
+      my $H__theta        = $H_sum_theta * $two_over_chr;
+      my $Watterson_theta = $num / $a_n;
+   
+    return [$Watterson_theta, $Fu_theta, $Pi_theta, $H__theta];
+
+}
+#----------------------------------------------------------------------------- 
+
+sub MAF_WINDOWS{
+    my ($self, $scaff_info) = @_;
+    my @scaffold_info = @{$scaff_info};
+    my %MAF_COUNTS;
+    my $n_windows;
+    my @RESULTS;
+
+  CHRS: while (@scaffold_info){
+      
+      my $seqid = shift @scaffold_info;
+      my $total_len = shift @scaffold_info;      
+      my $t = Tabix->new(-data => $self->{'file'});
+
+      my $last_pos = 0;
+
+      print STDERR "working on feature: $seqid\n";
+      
+    WINDOW: for(my $i = 10_000; $i < $total_len; $i += 10_000){
+
+	my $n_seg    = 0;
+	
+	my $it = $t->query($seqid, $last_pos, $i);
+	return if ! defined $it;
+	
+	my $window_maf_count = 0;
+	
+      LINE: while(my $l = $t->read($it)){
+	  $self->{line}{raw} = $l;
+	  $self->_Parse_Line();
+#	  $self->_Group($groups);
+	  next LINE unless $self->_type eq 'SNV';
+	  my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+	  my @gens = grep {!/\^/} @alleles;
+	  next LINE if (scalar grep {!/\^/} @alleles) != 2;
+	  my $ref        = @{$self->{line}{refined}{ref}}[0];
+	  my ($alt)      = grep {!/\^|$ref/} @alleles;
+	  my @all        = _Count_Genotypes($self->{'line'}{'genotypes'});
+	  $n_seg++;
+	  my $maf = $all[1]{$alt} / $all[0]{'allele_counts'}{'called'};
+	  $window_maf_count++ if $maf > .5;
+      }	
+	$last_pos = $i;    
+	$MAF_COUNTS{$window_maf_count}++;
+	$n_windows++;	    
+	push @RESULTS, $window_maf_count;	
+    }
+  }
+    while(my ($count, $number) = each %MAF_COUNTS){
+	print "COUNT_RESULTS:$count\t$number\n";
+    }
+    foreach my $results (@RESULTS){
+	print "ALL:$results\n";
+    }
+}
 
 1;
+#----------------------------------------------------------------------------- 
+sub Print_genotype{
+    my ($self, $groups, $scaff, $start, $end) = @_;
+    my $t = Tabix->new(-data => $self->{'file'});
+    my $it = $t->query($scaff, $start, $end);
+    return if ! defined $it;
+     
+  LINE: while(my $l = $t->read($it)){
+      $self->{line}{raw} = $l;
+      $self->_Parse_Line();
+      $self->_Group($groups);
+      next LINE unless $self->_type eq 'SNV';
+      my @alleles = @{_Parse_Alleles($self->{'line'}{'genotypes'})};
+      my @gens = grep {!/\^/} @alleles;
+    next LINE if (scalar grep {!/\^/} @alleles) != 2;
+      my $ref = @{$self->{line}{refined}{ref}}[0];
+      my ($alt) = grep {!/\^|$ref/} @alleles;
+      foreach my $tindv (sort {$a <=> $b} keys %{$self->{'line'}{'group_A'}}){
+	  print "$tindv\t$self->{'line'}{'group_A'}{$tindv}{genotype}\n";
+      }
+      foreach my $bindv (sort {$a <=> $b} keys %{$self->{'line'}{'group_B'}}){
+          print"$bindv\t$self->{'line'}{'group_B'}{$bindv}{genotype}\n";
+      }
+  }
+}
