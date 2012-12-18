@@ -65,17 +65,31 @@ sub load_density_data{
     print "##gene_name\cds_len\target_density\ttarget_KS\target_KN\tbackground_density\tbackground_KS\tbackground_KN\tDEN_DIFF\tKN-KS-background\n";
 
   GENE: while (my $gene = $genes->next){
+
+      
+
       my $gene_name = $gene->feature_id;
       my $seqid     = $gene->seqid;
       next GENE if( ! defined $SEQIDS{$seqid});
       
       my @mrnas = $gene->mRNAs;
-      my $longest_mrna = 0;
-      foreach my $mrna (@mrnas){
-	  $longest_mrna = $mrna if ($mrna->length > $longest_mrna);
+      my $longest_mrna;
+      my $longest_length = 0;
+    MRNA: foreach my $mrna (@mrnas){
+	  next MRNA if ! defined $mrna;
+	  my $m_length = $mrna->length;
+	  if ($m_length > $longest_length){
+	      $longest_mrna = $mrna;
+	      $longest_length = $m_length;
+	  }
+    }
+      
+      if(! defined $longest_mrna){
+	  print "$gene_name\t0\t0\t0\t0\t0\t0\t0\t0\t0\n";
+	  next GENE;
       }
       
-      my $start = $longest_mrna->begin;
+      my $start = $longest_mrna->start;
       my $end   = $longest_mrna->end;
 
       my $cds_len = $longest_mrna->CDS_length;
