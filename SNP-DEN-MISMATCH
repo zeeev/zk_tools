@@ -1,0 +1,115 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use GAL::Annotation;
+use Data::Dumper;
+use Tabix;
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+SNP-DEN-MISMATCH --gff3 refseq.gff3 --target target.cdr --background.cdr
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+my ($help);
+my $target_cdr;	      
+my $background_cdr;   
+my $gff3;             
+my $opt_success = GetOptions('help'          => \$help,
+			     'target=s'      => \$target_cdr,
+			     'background=s'  => \$background_cdr,
+			     'gff3=s'        => \$gff3,
+
+    );
+
+die $usage if $help || ! $opt_success;
+die $usage unless $target_cdr && $background_cdr && $gff3;
+
+my $target_dat     = initialize_tabix_cdr($target_cdr);
+
+my %SEQIDS;
+map {$SEQIDS{$_} = 1} $target_dat->getnames();
+
+my $background_dat = initialize_tabix_cdr($background_cdr);
+my %DENSITY_DATA;
+
+load_density_data($target_dat, $background_dat, $gff3);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+sub initialize_tabix_cdr {
+    my $bgzip_file = shift;
+    my $tabix_object = Tabix->new(-data=>$bgzip_file, -index=>"$bgzip_file.tbi");
+    return $tabix_object
+
+}
+#-----------------------------------------------------------------------------
+
+sub load_density_data{
+    my ($targ, $back, $gff) = @_;
+    my $gff3_object = GAL::Annotation->new($gff);
+    my $features = $gff3_object->features;
+    my $genes = $features->search({type => 'gene'});
+
+    print "##gene_name\cds_len\target_density\ttarget_KS\target_KN\tbackground_density\tbackground_KS\tbackground_KN\tDEN_DIFF\tKN-KS-background\n";
+
+  GENE: while (my $gene = $genes->next){
+      my $gene_name = $gene->feature_id;
+      my $seqid     = $gene->seqid;
+      next GENE if( ! defined $SEQIDS{$seqid});
+      
+      my @mrnas = $gene->mRNAs;
+      my $longest_mrna = 0;
+      foreach my $mrna (@mrnas){
+	  $longest_mrna = $mrna if ($mrna->length > $longest_mrna);
+      }
+      
+      my $start = $longest_mrna->begin;
+      my $end   = $longest_mrna->end;
+
+      my $cds_len = $longest_mrna->CDS_length;
+      if (! defined $cds_len || $cds_len == 0){
+	  $cds_len = $longest_mrna->length;
+      }
+      my ($target_density, $target_syn, $target_non_syn)                 = calc_density($targ, $seqid, $start, $end, $cds_len);
+      my ($background_density, $background_syn, $background_non_syn)     = calc_density($back, $seqid, $start, $end, $cds_len);
+
+      my $density_diff  = ($target_density - $background_density);
+      my $print_density = ($density_diff > 0) ? $density_diff : 0;
+
+      my $kn_ks = 0; 
+
+      if($background_syn > 0 && $background_non_syn > 0){
+	  $kn_ks = $background_non_syn / $background_syn; 
+      }
+      
+      print "$gene_name\t$cds_len\t$target_density\t$target_syn\t$target_non_syn\t$background_density\t$background_syn\t$background_non_syn\t$print_density\t$kn_ks\n";
+  }
+}
+#-----------------------------------------------------------------------------
+sub calc_density{
+    my ($tabix_object, $seqid, $start, $end, $exon_length) = @_;
+    my $tabix_it = $tabix_object->query($seqid, ($start -1), ($end + 1));
+    my $n         = 0;
+    my $n_syn     = 0;
+    my $n_non_syn = 0;
+    while(my $cdr_line = $tabix_object->read($tabix_it)){
+	my @l = split /\t/, $cdr_line;
+	$n_syn++     if $l[4] =~ /,synonymous_codon/;
+	$n_non_syn++ if $l[4] =~ /^non_syn/;
+	$n++ =~ /coding_variant/;
+    }
+    return (($n / $exon_length), ($n_syn /$exon_length), ($n_non_syn /$exon_length) );
+}
+#-----------------------------------------------------------------------------
