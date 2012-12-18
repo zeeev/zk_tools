@@ -1,4 +1,5 @@
 #!/usr/bin/perl
+use Inline C;
 use strict;
 use warnings;
 use Getopt::Long;
@@ -6,6 +7,7 @@ use Tabix;
 use Statistics::Descriptive;
 use Math::BigFloat;
 use POSIX;
+
 #-----------------------------------------------------------------------------
 #----------------------------------- MAIN ------------------------------------
 #-----------------------------------------------------------------------------
@@ -89,8 +91,7 @@ sub BIN_REGIONS{
 	    }
 	}
 	else{
-       
-	$REGION_STRUCT{$line_contents[0]}{"1:$line_contents[2]"} = 'NA';
+       	    $REGION_STRUCT{$line_contents[0]}{"1:$line_contents[2]"} = 'NA';
 	}
     }
     return \%REGION_STRUCT;
@@ -140,6 +141,11 @@ sub QUERY_RANGE {
 	my $total_non_ref =  $b_dat->[0] + $t_dat->[0];
 	my $total_ref     = ($b_dat->[1] + $t_dat->[1]) - $total_non_ref;
 	my $total         = ($b_dat->[1] + $t_dat->[1]);
+
+	#using the folded allele frequency specturm
+	#Directional Selection and the Site-Frequency Spectrum page 1780
+
+	($total_non_ref, $total_ref) = ($total_ref, $total_non_ref) if $total_non_ref > $total_ref;
 
 	$PI{TARGET}  += (choose($t_dat->[0],2)    + choose($ref_t, 2))     / choose($t_dat->[1],2);
 	$PI{BETWEEN} += (choose($total_non_ref,2) + choose($total_ref, 2)) / choose($total, 2);
@@ -225,7 +231,7 @@ my $regions = shift;
 	$total_sites = 0 if ! defined $total_sites;
 	
 	my $md = 'NA';
-	$md = MEAN_DIFF($data, $total_sites) if $total_sites = 50;
+	$md = MEAN_DIFF($data, $total_sites) if $total_sites > 50;
 
 	my @pos = split /:/, $pos;
 	my $S_W = 'NA';
@@ -348,6 +354,7 @@ sub choose{
     my $x    = Math::BigInt->new($n);
     my $y    = Math::BigInt->new($k);
     $results =  $x->Math::BigInt::bnok($y);
+#    my $n_results = zbinomial($n, $k);
     $N_CHOOSE{$n} =  $results->{value}[0];
     return $N_CHOOSE{$n};
 }
@@ -367,4 +374,29 @@ sub MEAN_DIFF{
     }
     
     return (1 / ($total * ($total -1))) * $md_sum;
+}
+
+
+#-----------------------------------------------------------------------------
+
+__END__
+__C__
+
+#include <stdio.h>
+#include <limits.h>
+ 
+typedef unsigned long ULONG; 
+ULONG zbinomial(ULONG n, ULONG k){
+    ULONG r = 1, d = n - k;
+    /* choose the smaller of k and n - k */
+	if (d > k) { k = d; d = n - k; }
+ 
+    while (n > k) {
+	if (r >= UINT_MAX / n) return 0; /* overflown */
+	    r *= n--;
+ 
+	/* divide (n - k)! as soon as we can to delay overflows */
+	    while (d > 1 && !(r % d)) r /= d--;
+    }
+    return r;
 }

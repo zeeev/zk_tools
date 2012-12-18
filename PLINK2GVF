@@ -1,0 +1,167 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Bio::Perl;
+use Bio::DB::Fasta;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------                               
+#----------------------------------- MAIN ------------------------------------                               
+#-----------------------------------------------------------------------------                               
+my $usage = "                                                                                                
+                                                                                                             
+Synopsis:                                                                                                    
+                                                                                                             
+PLINK2GVF -b hg19 -t illumina-info -map file.map -ped file.ped -r reference.fasta
+                                                                                                             
+Description:                                                                                                 
+                                                                                                             
+-t, tech-class; What platform is the data coming from?  Is it chip or DNA seq.  
+Please look at the GVF specs for proper grammer.  This is for the header.
+
+-b, build; Puts the build in the GVF header.                                                
+                                                             
+-m, mapfile;  Plink map formatted file.
+
+-ped, pedfile; Plink ped formatted file.
+
+-r, reference; Reference fasta file.  MUST MATCH YOUR DATA!
+ 
+
+";
+
+
+my ($help);
+my $build;
+my $tech_class;
+my $map;
+my $ped;
+my $ref_fasta;
+my $opt_success = GetOptions('help'         => \$help,
+			     'map=s'        => \$map,
+			     'ped=s'        => \$ped,
+			     'build=s'      => \$build,
+			     'tech_class=s' => \$tech_class,
+			     'ref_fasta=s'  => \$ref_fasta
+    );
+
+die $usage if $help || ! $opt_success;
+
+die $usage if !defined $build && !defined $tech_class && !defined $map && !defined $ped && !defined $ref_fasta;  
+
+
+my %MAP;
+
+#-------------------------------------------------------------------------------
+# initialize reference db
+my $db   = Bio::DB::Fasta->new($ref_fasta, -debug=>1);
+#-------------------------------------------------------------------------------
+
+open(FH, '<', $map) || die "didn't find $map";
+
+my $snp_count = 0;
+
+while(my $l = <FH>){
+    $snp_count++;
+    chomp $l;
+    my @line = split /\s+/, $l;
+    $MAP{$snp_count} = \@line;
+}
+
+close FH;
+
+#-------------------------------------------------------------------------------
+
+open(FH, '<', $ped) || die "didn't find $ped";
+
+
+my $line_count = 0;
+while(my $l = <FH>){
+    my @l = split /\s+/, $l;
+    my $indv = $l[1];
+    my $sex  = $l[4];
+	
+    open(FH2, '>', "$l[1].converted.gvf") || die "cannot open $l[1].converted.gvf";
+    
+    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+    $year += 1900;
+
+    $mday   = "0$mday" if length $mday == 1;
+    $mon    = "0$mon" if length $mon == 1; 
+
+    print FH2 "\#\#gvf-version 1.05\n";
+    print FH2 "\#\#reference-fasta $ref_fasta\n";
+    print FH2 "\#\#file-version 1.01\n";
+    print FH2 "\#\#file-date $year-$mon-$mday\n";
+    print FH2 "\#\#individual-id ID=PLINK$l[1];Gender=female;\n" if $l[4] == 2;
+    print FH2 "\#\#individual-id ID=PLINK$l[1];Gender=male;\n"   if $l[4] == 1;
+    print FH2 "\#\#technology-platform-class $tech_class\n";
+    print FH2 "\#plink_ped_dump family_id=$l[0];Individual_ID=$l[1];Paternal_ID=$l[2]; Maternal_ID=$l[3];Sex=$l[4];Phenotype=$l[5]\n";
+    print FH2 "\#conversion_info from=plink;to=gvf;direct_issues_to=zev\.kronenberg[at]gmail\.com\n";
+    
+    for(0 .. 5){
+	shift @l;
+    }
+	
+	
+    my $g_count = 0;
+    GENOTYPES: while(defined $l[0]){
+	
+	$g_count++;
+	
+	my @m_line = @{$MAP{$g_count}};
+	my @dat;
+	
+	my $chrm = "chr$m_line[0]";
+	
+	print STDERR "$m_line[0]\n";
+	
+ 
+	if($m_line[0] > 22){
+	    $chrm = 'chrX' if $m_line[0] == 23;
+	    $chrm = 'chrM' if $m_line[0] == 26;
+	    $chrm = 'chrY' if $m_line[0] == 24;
+	    $chrm = 'chrXY' if $m_line[0] == 25;
+	}
+	
+	
+	my $ref = uc $db->seq($chrm, $m_line[3] => $m_line[3]);
+	push @dat, $chrm;
+	push @dat, $indv;
+	push @dat, 'SNV';
+	push @dat, $m_line[3];
+	push @dat, $m_line[3];
+	push @dat, ('.','.','.');
+	my $id = "ID=$m_line[1]";
+	my @g  = (shift @l, shift @l);
+	
+	@g  = ($g[0], '!') if $chrm eq 'chrY' || $chrm eq 'chrM';
+	@g  = ($g[0], '!') if $chrm eq 'chrX' && $sex eq 1;
+	@g = ('^','^') if $g[0] eq 0 || $g[1] eq 0;
+	my $g = join ",", @g;
+	my $zyg  =  'Zygosity=homozygous'  if $g[0] eq $g[1];
+	$zyg     = 'Zygosity=heterozygous' if ! defined $zyg;
+	my $var  =  "Variant_seq=$g";
+	my $refv =  "Reference_seq=$ref";
+	push @dat,  "$id;$var;$refv;$zyg;";
+	print FH2 join "\t", @dat if $chrm ne 'chrXY';
+	print FH2 "\n" if $chrm ne 'chrXY';
+    }
+close FH2;    
+}
+
+
+    
+    
+    
+
+
+#-------------------------------------------------------------------------------
+
+
+
+
+
+
+
