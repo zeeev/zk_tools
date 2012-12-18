@@ -1,0 +1,77 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/RE-RANK-VAAST ranking.file.txt vaast.simple.txt
+
+Description:
+
+vI re-rank vaast excluding evolution
+
+";
+
+
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+my %QUANTILE;
+
+while (<$IN>) {
+    chomp;
+    $_ =~ s/\"//g;
+    next if $_ =~ /^V1/;
+    my @l = split /\t/, $_;
+    $QUANTILE{$l[1]} = $l[9];
+}
+
+close $IN;
+
+my $file2 = shift;
+open (my $FH, '<', $file2) or die "Can't open $file2 for reading\n$!\n";
+
+my %SIMPLE;
+
+while (<$FH>) {
+    chomp;
+    next if $_ =~ /^RANK/;
+    my @l = split /\t/, $_;
+    shift @l;
+    my $quant = $QUANTILE{$l[0]};
+    $SIMPLE{$l[1]}{$quant}{$l[0]} = join "\t", @l;
+}
+
+close $FH;
+
+my $count = 0;
+foreach my $pvals (sort {$a <=> $b} keys %SIMPLE){
+
+    foreach my $quant (sort {$a <=> $b} keys %{$SIMPLE{$pvals}}){
+	foreach my $gene (sort {$a cmp $b} keys %{$SIMPLE{$pvals}{$quant}}){
+	    $count++;
+	    my $line_dat = $SIMPLE{$pvals}{$quant}{$gene};
+	    print "$count\t$pvals\t$quant\t$line_dat\n";
+	}
+    }
+}
+
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+
