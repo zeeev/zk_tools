@@ -45,11 +45,11 @@ while (<$IN>) {
     next if $_ =~ /gene_name/;
     my @l = split /\t/, $_;
     if($beta){
-	$QUANTILE{$l[0]} = $l[-2];
+	$QUANTILE{$l[1]} = $l[-2];
 #	print "$l[-2]\n"
     }
     if($gamma){
-	$QUANTILE{$l[0]} = $l[-1];
+	$QUANTILE{$l[1]} = $l[-1];
 #	print "$l[-2]\n"
     }
     if($mixed){
@@ -57,7 +57,7 @@ while (<$IN>) {
 	if($l[-1] > 0 && $l[-2] > 0){
 	    $val = $l[-1] * $l[-2];
 	}
-	$QUANTILE{$l[0]} = $val;
+	$QUANTILE{$l[1]} = $val;
 #	print "val\n";
     }
 }

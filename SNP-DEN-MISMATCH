@@ -62,7 +62,7 @@ sub load_density_data{
     my $features = $gff3_object->features;
     my $genes = $features->search({type => 'gene'});
 
-    print "##gene_name\cds_len\target_density\ttarget_KS\target_KN\tbackground_density\tbackground_KS\tbackground_KN\tDEN_DIFF\tKN-KS-background\n";
+    print "##gene_name\tcds_len\target_density\ttarget_KS\target_KN\tbackground_density\tbackground_KS\tbackground_KN\tDEN_DIFF\tKN-KS-background\n";
 
   GENE: while (my $gene = $genes->next){
 
@@ -99,15 +99,23 @@ sub load_density_data{
       my ($target_density, $target_syn, $target_non_syn)                 = calc_density($targ, $seqid, $start, $end, $cds_len);
       my ($background_density, $background_syn, $background_non_syn)     = calc_density($back, $seqid, $start, $end, $cds_len);
 
-      my $density_diff  = ($target_density - $background_density);
-      my $print_density = ($density_diff > 0) ? $density_diff : 0;
+      my  $print_density = ($target_density - $background_density);
+      #my $print_density = ($density_diff > 0) ? $density_diff : 0;
 
       my $kn_ks = 0; 
 
       if($background_syn > 0 && $background_non_syn > 0){
 	  $kn_ks = $background_non_syn / $background_syn; 
       }
-      
+
+      if($background_non_syn == 0 && $background_syn > 0){
+	  if($background_non_syn > 0){
+	      $kn_ks = -1 * (1/$background_non_syn); 
+	  }else{
+	      $kn_ks = 0;
+	  }
+      }
+
       print "$gene_name\t$cds_len\t$target_density\t$target_syn\t$target_non_syn\t$background_density\t$background_syn\t$background_non_syn\t$print_density\t$kn_ks\n";
   }
 }
