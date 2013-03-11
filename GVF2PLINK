@@ -9,6 +9,18 @@ my %bfh;
 
 my ($list_file, @files) = @ARGV;
 
+my $usage = '
+GVF2PLINK file_ids.txt *gvf
+
+file_ids.txt is a tab-delim file with two columns:
+1) filename.
+2) desired plink ID.
+
+';
+
+
+die $usage unless $list_file && $files[0];
+
 # Get the filename off of @ARGV first
 open(KEY, "<", $list_file) or die "Can't open $list_file\n";
 
@@ -18,7 +30,8 @@ my %bird_files;
 while(my $line = <KEY>){
     next if $line =~ /^(\s)*$/;
     chomp $line;
-    my ($file_name, $bird_name) = split /\t/, $line;
+    my ($file_name, $bird_name, $catch) = split /\s+/, $line;
+    die $usage unless ! defined $catch;
     $bird_files{$file_name} = $bird_name;
 }
 close KEY;
@@ -35,8 +48,10 @@ foreach my $file (@files){
     
     while(<FILE1>){
 	next if /^(\s)*$/;
+	next if /^\#/;
 	chomp;
 	my ($seqid, $source, $type, $start, $end, $score, $strand,$phase, $attrb_txt) = split /\t/;
+	next unless $type eq 'SNV';
 	$seqid =~ s/chr//;
 	my @splits = split /;|=/, $attrb_txt;
 	my $split_len = scalar @splits;

@@ -148,7 +148,10 @@ sub Fst{
     my $tot_q_count = $background[0] + $target[0]; 
     my $tot_q       = $tot_q_count   / $n_tot;
 
-    my $Gs = (($background[1] / $n_tot) * ($b_q**2 + (1 - $b_q)**2)) + (($target[1] / $n_tot) * ($t_q**2 + (1 - $t_q)**2));
+#watch out for pool sizes that are teh same;
+
+    my $Gs = (0.5 * ($b_q**2 + (1 - $b_q)**2)) + (0.5 * ($t_q**2 + (1 - $t_q)**2));
+    #my $Gs = (($background[1] / $n_tot) * ($b_q**2 + (1 - $b_q)**2)) + (($target[1] / $n_tot) * ($t_q**2 + (1 - $t_q)**2));
     my $Gt = ((1 - $tot_q)**2) + ($tot_q**2);
 
     my $Fst = 'NA';
