@@ -1,0 +1,93 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use File::Basename;
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+/home/zkronenb/tools/zk_tools/SNVer2gvf <How the hell do you use this thing>
+
+Description:
+
+No really, how the hell do you use this thing!
+
+";
+
+
+my ($help);
+my $opt_success = GetOptions('help'    => \$help,
+			      );
+
+die $usage if $help || ! $opt_success;
+
+my $file = shift;
+die $usage unless $file;
+open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
+
+my @bams;
+
+LINE: while (<$IN>) {
+    chomp;
+    if($_ =~ /^#/){
+	if($_ =~ /CHROM/){
+	    @bams = split /\t/, $_;
+	    my $count = 9;
+	    foreach my $bam (@bams[9..(scalar(@bams) -1 )]){
+		my($filename, $directories, $suffix) = fileparse($bam);
+		$bams[$count] = $filename;
+		$count++;
+	    }
+	}
+	next LINE;
+    }
+    my @line = split /\t/, $_;
+    my %score = map {$_} (split /;|=/, $line[7]);
+    my $count = 8;
+    my $end = $line[1];
+
+    my $type = 'SNV';
+    if(length $line[4] > 1 ){
+	$type = 'insertion' if $line[4] =~ /^\+/;
+	$type = 'deletion'  if $line[4] =~ /^\-/;
+	$end  = $end + ((length $line[4]) - 1);
+    }
+    foreach my $pop (@line[9..((scalar @line) - 1)]){
+	my $p = process_geno($pop, $line[3], $line[4], $type);
+	$count++;
+	my $file_ref = $bams[$count];
+	print join "\t", ($line[0], $file_ref, $type, $line[1], $line[1], $score{'PV'}, '.', '.', "ID=$line[0]:$line[1]:$end:$file_ref;$p");
+	print "\n";
+    }
+}
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub process_geno{
+    my ($count, $ref, $alt, $type) = @_;
+    
+    $ref =~ s/\+|-//g;
+    $alt =~ s/\+|-//g;
+
+    my ($da, $bg) = split /:/, $count;
+    $ref = '-' if $type ne 'SNV';
+    if($da eq 'NA'){ 
+	return "Variant_seq=^;Reference_seq=$ref;daf=^;count=$count;Genotype=homozygous;"
+    }
+    if($bg == 0){
+	return "Variant_seq=^;Reference_seq=$ref;daf=^;count=$count;Genotype=homozygous;"
+    }
+    if($bg > 0){
+	my $daf = $da > 0 ? $da / $bg : 0;
+	return "Variant_seq=$alt;Reference_seq=$ref;daf=$daf;count=$count;Genotype=homozygous;" if $daf == 1;
+	return "Variant_seq=$ref,$alt;Reference_seq=$ref;daf=$daf;count=$count;Genotype=heterozygous;" if $da > 0;
+	return "Variant_seq=$alt;Reference_seq=$ref;daf=$daf;count=$count;Genotype=homozygous;" if $da == 0;
+    }
+}
+
