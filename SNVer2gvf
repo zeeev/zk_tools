@@ -10,7 +10,7 @@ my $usage = "
 
 Synopsis:
 
-/home/zkronenb/tools/zk_tools/SNVer2gvf <How the hell do you use this thing>
+SNVer2gvf my.svner.vcf > my.gvf
 
 Description:
 
