@@ -57,9 +57,11 @@ sub Parse_Build{
 
 sub Repos_Data{
     open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
-    while (my $l = <$IN>) {
+    LINE: while (my $l = <$IN>) {
         chomp $l;
+	 
 	my @l = split /\t/, $l;
+	next LINE if $l[$column] !~ /[0-9]+/;
 	my $pos = $l[$column];
 	$l[$column] =  $BUILD_RECORD{$l[0]} + $pos;
 	print join "\t", @l;
