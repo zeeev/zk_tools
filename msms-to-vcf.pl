@@ -197,11 +197,20 @@ sub genotypeLikelihood{
 #-----------------------------------------------------------------------------
 sub printVCFGenotypes{
 
+    my %seen_pos;
+
     my $snpIndex = -1;
 
     my @GTS = ("0/0", "0/1", "1/1");
 
-    foreach my $pos (@{$msms_data{positions}}){
+    POS: foreach my $pos (@{$msms_data{positions}}){
+
+	if(exists $seen_pos{$pos}){
+	    next POS;
+	}
+
+	$seen_pos{$pos} = 1;
+
 	$snpIndex += 1;
 	
 	my $vcfLine;
