@@ -43,6 +43,11 @@ my $opt_success = GetOptions('help'                  => \$help,
 die $usage if $help || ! $opt_success || ! $msms;
 
 loadMsmsData();
+
+if(scalar (($msms_data{haplotypes}) % 2) != 0){
+    print "Fatal: must simulate even number of haplotypes for diploids!\n";
+    die ;
+}
 printVCFHeader();
 printVCFGenotypes();
 #-----------------------------------------------------------------------------
@@ -64,9 +69,6 @@ sub loadMsmsData{
 	if($lcounter == 1){
 	    $msms_data{unique} = $line;
 	}
-	if($lcounter < 4){
-
-	}
 	if($lcounter == 4){
 	    ($_, $msms_data{segsites}) = split /:/, $line;
 	}
@@ -84,12 +86,15 @@ sub loadMsmsData{
 	    print "Fatal:  More than one MSMS simulation found in the file\n";
 	    print "Info :  Found // more than once in the file.           \n";
 	}
-	if($lcounter > 4 && $line =~ /^\s+/){
+	if($lcounter > 6 && $line =~ /\s+/){
 	    print "Info : Read in all of MSMS simulation \n";
 	    last;
 	}
-	if($lcounter > 6){
-	    push @{$msms_data{haplotypes}}, $line;
+
+	if($lcounter > 5){
+	    if($line =~ /^[01]/){
+		push @{$msms_data{haplotypes}}, $line;
+	    }
 	}
 	$lcounter++;
     }
@@ -102,7 +107,7 @@ sub printVCFHeader {
     my $chromLine ;
     $chromLine .= "\#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT";
 
-    for(my $i = 0; $i < scalar @{$msms_data{haplotypes}}; $i++){
+    for(my $i = 0; $i < scalar @{$msms_data{haplotypes}}/2; $i++){
 	my $id = sprintf ("%08X", rand(0xffffffff));
 	$chromLine .= "\t$id";
     }
@@ -115,7 +120,7 @@ sub printVCFHeader {
     $header .= "##msmsCommand=$msms_data{command}\n";
     $header .= "##INFO=<ID=AF,Number=1,Type=Float,Description=\"Allele Frequency\">\n";
     $header .= "##INFO=<ID=HF,Number=1,Type=Float,Description=\"Heterozygous genotype Frequency\">\n";
-    $header .= "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
+    $header .= "##FORMAT=<ID=GT,Number=G,Type=String,Description=\"Genotype\">\n";
     $header .= "##FORMAT=<ID=TR,Number=1,Type=String,Description=\"True phased genotype\">\n";
     $header .= "##FORMAT=<ID=GL,Number=3,Type=Float,Description=\"Simulated genotype likelihoods AA,AB,BB\">\n";
     $header .= "##FORMAT=<ID=QT,Number=1,Type=String,Description=\"Quality distribution simulated high\|low \">\n";
@@ -220,7 +225,7 @@ sub printVCFGenotypes{
 	
 
 
-	for(my $hapIndex = 0; $hapIndex < scalar @{$msms_data{haplotypes}} -2; $hapIndex+=2){
+	for(my $hapIndex = 0; $hapIndex < scalar @{$msms_data{haplotypes}} -1; $hapIndex+=2){
 
 	    my $qflag = 0;
 	    if(rand() < $lowQualityFraction){
