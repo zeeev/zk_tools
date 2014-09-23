@@ -10,7 +10,7 @@ my $usage = "
 
 Synopsis:
 
-cppStub -n Zev N. Kronenberg -e zev.kronenberg\@gmail.com -i my company -f file.cpp
+cppStub -f t.cpp -n \"A freak\" -g zn:k -e \"neversay\@gmail.com\" -o \"The moon\"
 
 Description:
 
@@ -22,7 +22,8 @@ Options:
 --file, -f    - required - <STRING> name of program stub
 --name, -n    - optional - <STRING> your name
 --email,-e    - optional - <STRING> email address
---institue,-i - optional - <STRING> place
+--getopts,-g  - optional - <STRING> command line arguments you want your cpp to process
+--organization,-o - optional - <STRING> place
 ";
 
 
@@ -37,6 +38,8 @@ my $ORGANIZATION= "Unviersity of Utah\n    School of Medicine\n    Salt Lake Cit
 
 my $opt_success = GetOptions('help'        => \$help,
 			     "name=s"      => \$NAME,
+			     "email=s"     => \$EMAIL,
+			     "getopts=s"   => \$OPTIONS,
 			     "file=s"      => \$FILE,
 			     "ORGANIZATION=s" => \$ORGANIZATION
     );
@@ -105,6 +108,8 @@ sub parse{
 	    $div .= "\n\t\t break;\n\t\t\}\n"
 	}
     }
+    $div .="\t\tcase ?:\n\t\t{";
+    $div .="\n\t\t break;\n\t\t}\n";
 
     $div .="\t\}\n    }\n";
     $div .= "return 1;";
@@ -172,8 +177,8 @@ sub printInfo{
     $info .= "This program was created at:  $datestring\n";
     $info .= "This program was created by:  $NAME\n\n";
     $info .= "\n";
-    $info .= "Contact: $EMAIL";
-    $info .= "Organization: $ORGANIZATION";
+    $info .= "Contact: $EMAIL\n\n";
+    $info .= "Organization: $ORGANIZATION\n\n";
     $info .= license();
     $info .= "\n";
     $info .= '*/';
