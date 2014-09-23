@@ -129,9 +129,9 @@ sub main{
     $div .= "\n\n";
     
     $div .= 'int main( int argc, const char** argv)';
-    $div .= "\nint parse = parseOpts(argc, argv);\n";
     $div .= "\n";
     $div .= '{';
+    $div .= "\nint parse = parseOpts(argc, argv);\n";
     $div .= "\n";
     $div .= 'return 0;';
     $div .= "\n";
