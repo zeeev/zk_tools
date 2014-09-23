@@ -69,7 +69,7 @@ sub global{
     $div   .= '}globalOpts;';
     $div   .= "\n";
     $div   .= "\n";
-    $div   .= "optString = $OPTIONS;";
+    $div   .= "static const char *optString = \"$OPTIONS\";";
     $div   .= "\n";
     return $div;
 }
@@ -78,7 +78,7 @@ sub parse{
    
     my $div ="\n";
     
-    $div .= '/--------------------------------   OPTIONS   --------------------------------';
+    $div .= '//-------------------------------   OPTIONS   --------------------------------';
     $div .= "\n";
     $div .= 'int parseOpts(int argc, char** argv)';
     $div .= "\n";
@@ -86,9 +86,9 @@ sub parse{
     $div .= "\n";
     $div .= '    int opt = 0;';
     $div .= "\n";
-    $div .= '    globalOpts.file = "NA"';
+    $div .= '    globalOpts.file = "NA";';
     $div .= "\n";
-    $div .= '    opt = getopt(argc, argv, optString)';
+    $div .= '    opt = getopt(argc, argv, optString);';
     $div .= "\n";
     $div .= '    while(opt != -1){';
     $div .= "\n\tswitch(opt)\{\n";
@@ -99,19 +99,19 @@ sub parse{
 	if(length($opt) > 1){
 	    for(my $i = 0; $i < length($opt); $i++){
 		my $char = substr($opt, $i, 1);
-		$div .= "\t\tcase $char:\n\t\t\{";
+		$div .= "\t\tcase \'$char\':\n\t\t\{";
 		$div .= "\n\t\t break;\n\t\t\}\n";
 	    }
 	}
 	else{
-	    $div .= "\t\tcase $opt:\n\t\t{";
+	    $div .= "\t\tcase \'$opt\':\n\t\t{";
 	    $div .= "\n\t\t break;\n\t\t\}\n"
 	}
     }
-    $div .="\t\tcase ?:\n\t\t{";
+    $div .="\t\tcase \'?\':\n\t\t{";
     $div .="\n\t\t break;\n\t\t}\n";
 
-    $div .="\t\}\n    }\n";
+    $div .="\t\}\n \n  opt = getopt( argc, argv, optString ); \n   }\n";
     $div .= "return 1;";
     $div .= "\n}";
     return $div;
@@ -121,14 +121,14 @@ sub parse{
 
 sub main{
     my $div = "\n";
-    $div .= '/--------------------------------    MAIN     --------------------------------';
+    $div .= '//-------------------------------    MAIN     --------------------------------';
     $div .= "\n";
     $div .= '/*';
     $div .= "\n Comments:\n";
     $div .= '*/';
     $div .= "\n\n";
     
-    $div .= 'int main( int argc, const char** argv)';
+    $div .= 'int main( int argc, char** argv)';
     $div .= "\n";
     $div .= '{';
     $div .= "\nint parse = parseOpts(argc, argv);\n";
@@ -144,7 +144,7 @@ sub main{
 sub divider{
     
     my $div = "\n";
-    $div .= '/-------------------------------- SUBROUTINE --------------------------------';
+    $div .= '//------------------------------- SUBROUTINE --------------------------------';
     $div .= "\n";
     $div .= '/*';
     $div.= "\n Function input  :\n";
@@ -183,8 +183,8 @@ sub printInfo{
     $info .= "\n";
     $info .= '*/';
     $info .= "\n";
-    $info .= global();
     $info .= includes();
+    $info .= global();
     $info .= parse();
     $info .= divider();
     $info .= main();
