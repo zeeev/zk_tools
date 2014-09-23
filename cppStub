@@ -52,8 +52,8 @@ open (my $IN, '>', $FILE) or die "Can't open $FILE for reading\n$!\n";
 
 
 
-print printInfo();
-
+print $IN printInfo();
+close $IN;
 
 #-----------------------------------------------------------------------------
 #-------------------------------- SUBROUTINES --------------------------------
