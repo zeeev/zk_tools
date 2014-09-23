@@ -1,0 +1,245 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+cppStub -n Zev N. Kronenberg -e zev.kronenberg\@gmail.com -i my company -f file.cpp
+
+Description:
+
+generates a basic c++ stub.
+
+
+Options:
+
+--file, -f    - required - <STRING> name of program stub
+--name, -n    - optional - <STRING> your name
+--email,-e    - optional - <STRING> email address
+--institue,-i - optional - <STRING> place
+";
+
+
+my ($help);
+
+my $NAME = "Zev N. Kronenberg";
+my $FILE ;
+my $EMAIL= "zev.kronenber\@gmail.com";
+my $VERSION = "0.0.1";
+my $OPTIONS = "hv:f";
+my $ORGANIZATION= "Unviersity of Utah\n    School of Medicine\n    Salt Lake City, Utah\n";
+
+my $opt_success = GetOptions('help'        => \$help,
+			     "name=s"      => \$NAME,
+			     "file=s"      => \$FILE,
+			     "ORGANIZATION=s" => \$ORGANIZATION
+    );
+
+die $usage if $help || ! $opt_success;
+
+
+die $usage unless $FILE;
+open (my $IN, '>', $FILE) or die "Can't open $FILE for reading\n$!\n";
+
+
+
+print printInfo();
+
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub global{
+    my $div   .= "\n";
+    $div   .= "\n";
+    $div   .= 'struct options{';
+    $div   .= "\n";
+    $div   .= '   std::string file;';
+    $div   .= "\n";
+    $div   .= '}globalOpts;';
+    $div   .= "\n";
+    $div   .= "\n";
+    $div   .= "optString = $OPTIONS;";
+    $div   .= "\n";
+    return $div;
+}
+
+sub parse{
+   
+    my $div ="\n";
+    
+    $div .= '/--------------------------------   OPTIONS   --------------------------------';
+    $div .= "\n";
+    $div .= 'int parseOpts(int argc, char** argv)';
+    $div .= "\n";
+    $div .= '    {';
+    $div .= "\n";
+    $div .= '    int opt = 0;';
+    $div .= "\n";
+    $div .= '    globalOpts.file = "NA"';
+    $div .= "\n";
+    $div .= '    opt = getopt(argc, argv, optString)';
+    $div .= "\n";
+    $div .= '    while(opt != -1){';
+    $div .= "\n\tswitch(opt)\{\n";
+
+    my @opts = split /:/, $OPTIONS;
+    
+    foreach my $opt (@opts){
+	if(length($opt) > 1){
+	    for(my $i = 0; $i < length($opt); $i++){
+		my $char = substr($opt, $i, 1);
+		$div .= "\t\tcase $char:\n\t\t\{";
+		$div .= "\n\t\t break;\n\t\t\}\n";
+	    }
+	}
+	else{
+	    $div .= "\t\tcase $opt:\n\t\t{";
+	    $div .= "\n\t\t break;\n\t\t\}\n"
+	}
+    }
+
+    $div .="\t\}\n    }\n";
+    $div .= "return 1;";
+    $div .= "\n}";
+    return $div;
+
+
+}
+
+sub main{
+    my $div = "\n";
+    $div .= '/--------------------------------    MAIN     --------------------------------';
+    $div .= "\n";
+    $div .= '/*';
+    $div .= "\n Comments:\n";
+    $div .= '*/';
+    $div .= "\n\n";
+    
+    $div .= 'int main( int argc, const char** argv)';
+    $div .= "\nint parse = parseOpts(argc, argv);\n";
+    $div .= "\n";
+    $div .= '{';
+    $div .= "\n";
+    $div .= 'return 0;';
+    $div .= "\n";
+    $div .= '}';
+    $div .= "\n";
+    
+    return $div;
+    
+}
+sub divider{
+    
+    my $div = "\n";
+    $div .= '/-------------------------------- SUBROUTINE --------------------------------';
+    $div .= "\n";
+    $div .= '/*';
+    $div.= "\n Function input  :\n";
+    $div.= "\n Function does   :\n";
+    $div.= "\n Function returns:\n\n";
+
+    $div.= '*/'; 
+    $div.= "\n";
+    $div.= 'void sub()';
+    $div .= "\n";
+    $div.= '{';
+    $div .= "\n";
+    $div.= '}';
+    $div .= "\n";
+
+    return $div;
+
+}
+
+sub printInfo{
+    
+    my $info;
+
+    $info .= '/*';
+    $info .= "\n";
+    $info .= "\n";
+    
+    my $datestring = localtime();
+    
+    $info .= "This program was created at:  $datestring\n";
+    $info .= "This program was created by:  $NAME\n\n";
+    $info .= "\n";
+    $info .= "Contact: $EMAIL";
+    $info .= "Organization: $ORGANIZATION";
+    $info .= license();
+    $info .= "\n";
+    $info .= '*/';
+    $info .= "\n";
+    $info .= global();
+    $info .= includes();
+    $info .= parse();
+    $info .= divider();
+    $info .= main();
+    return $info;
+}
+
+sub includes{
+
+    my $includes = "\n";
+
+    $includes .=  "#include <string>\n";
+    $includes .=  "#include <iostream>\n";
+    $includes .=  "#include <math.h>\n";
+    $includes .=  "#include <cmath>\n";
+    $includes .=  "#include <stdlib.h>\n";
+    $includes .=  "#include <time.h>\n";
+    $includes .=  "#include <stdio.h>\n";
+#    $includes .=  "#include <getopt.h>\n";
+    $includes .=  "#include <unistd.h>\n\n";
+
+    return $includes;
+
+}
+
+
+sub license{
+
+    my $license .= "The MIT License (MIT)\n\n";
+
+    my @lc = localtime();
+    
+    $lc[5] += 1900;
+    
+    $license .= "Copyright (c) <$lc[5]> <$NAME>\n\n";
+    
+    my $body = << "LIC";
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+LIC
+
+
+$license .= $body;	
+return $license
+
+}
+
+
