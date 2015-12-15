@@ -10,22 +10,27 @@ my $usage = "
 
 Synopsis:
 
-REHH_BEAGLE -s scaffold612 beagle.bgl
+REHH_BEAGLE -s scaffold612 beagle.bgl -n 10000
 
 Description:
 
 No really, how the hell do you use this thing!
+
+-s seqid
+-n number of genotypes
 
 ";
 
 
 my ($help);
 my $scaffold;
+my $NHAP = 0;
 my $opt_success = GetOptions('help'       => \$help,
-			     'scaffold=s' => \$scaffold
-		      );
+			     'scaffold=s' => \$scaffold,
+			     'nhap=s'     => \$NHAP
+    );
 
-die $usage if $help || ! $opt_success;
+die $usage if $help || ! $opt_success || ! $NHAP || ! $scaffold;
 
 my $file = shift;
 die $usage unless $file;
@@ -33,25 +38,50 @@ open (my $IN, '<', $file) or die "Can't open $file for reading\n$!\n";
 
 my %DAT;
 
-for(my $i = 0; $i < 80; $i++){
-    $DAT{$i} = [];
-}
+my @LOC ;
+my %LOCP;
+
+
+#for(my $i = 0; $i < ($NHAP*2); $i++){
+#    $DAT{$i} = [];
+#}
 
 while (<$IN>) {
     chomp;
-    next if $_ =~ /^I/;
-    next unless $_ =~ /$scaffold:/;
-    my @l = split /\s+/, $_;
-    shift @l;
-    my ($seqid, $pos, $ref) = split /:/, shift @l;
-    my $count = 0;
-    for(my $j = 0; $j < 80; $j++){
-	my $a = shift @l;
-	if($a eq $ref){
-	    push @{$DAT{$j}}, 1;
-	}else{
-	    push @{$DAT{$j}}, 2;
+    next if $_ =~ /^\#/;
+
+    
+
+
+    my @LINE = split /\t/, $_;
+
+    next if $LINE[3] =~ /,/;
+    next if $LINE[4] =~ /,/;
+    
+    next if defined $LOCP{$LINE[1]};
+    $LOCP{$LINE[1]} = 1;
+
+    push @LOC, $LINE[1];
+
+    shift @LINE for (1..9)   ;
+
+    my $j = 0;
+
+    foreach my $g (@LINE){
+
+	my @z = split /\|/, $g;
+	
+	if($z[0] > 1){
+
 	}
+	if($z[1] > 1){
+
+	}
+
+	push @{$DAT{$j}}, $z[0] +1;
+	$j++;
+	push @{$DAT{$j}}, $z[1] +1;
+	$j++;
     }
 }
 
@@ -60,11 +90,14 @@ while(my($id, $value) = each %DAT){
     print join " ", @{$value};
     print "\n";
 }
+
+foreach my $loc (@LOC){
+    print STDERR "$scaffold:$loc $scaffold $loc 1 2\n";
+}
+
 #-----------------------------------------------------------------------------
 #-------------------------------- SUBROUTINES --------------------------------
 #-----------------------------------------------------------------------------
 
-sub {
 
-}
 
